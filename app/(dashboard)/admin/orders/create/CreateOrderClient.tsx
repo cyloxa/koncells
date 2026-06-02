@@ -47,6 +47,7 @@ export default function CreateOrderPage() {
   // Customer selection
   const [customerQuery, setCustomerQuery] = useState("");
   const [customers, setCustomers] = useState<CustomerResult[]>([]);
+  const [customerLoading, setCustomerLoading] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(null);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const customerRef = useRef<HTMLDivElement>(null);
@@ -64,6 +65,7 @@ export default function CreateOrderPage() {
   // Product search
   const [productQuery, setProductQuery] = useState("");
   const [products, setProducts] = useState<ProductResult[]>([]);
+  const [productLoading, setProductLoading] = useState(false);
   const [showProductDropdown, setShowProductDropdown] = useState(false);
   const productRef = useRef<HTMLDivElement>(null);
 
@@ -74,25 +76,34 @@ export default function CreateOrderPage() {
   const [submitting, setSubmitting] = useState(false);
 
   // ─── Customer search ──────────────────────────────────
-  const searchCustomersDebounced = useCallback(async (q: string) => {
-    if (!q.trim()) {
-      setCustomers([]);
-      return;
-    }
+  const searchCustomersFn = useCallback(async (q: string) => {
+    setCustomerLoading(true);
     try {
       const results = await searchCustomers(q);
-      setCustomers(results as any);
-    } catch {
+      // The server action returns User objects with _count; map to our interface
+      const mapped = (results as any[]).map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        phone: r.phone,
+        location: r.location,
+      }));
+      setCustomers(mapped);
+      setShowCustomerDropdown(true);
+    } catch (e) {
+      console.error("Customer search error:", e);
       setCustomers([]);
+    } finally {
+      setCustomerLoading(false);
     }
   }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (customerQuery) searchCustomersDebounced(customerQuery);
+      searchCustomersFn(customerQuery);
     }, 300);
     return () => clearTimeout(timer);
-  }, [customerQuery, searchCustomersDebounced]);
+  }, [customerQuery, searchCustomersFn]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -140,11 +151,13 @@ export default function CreateOrderPage() {
           location: newCustomer.location || null,
         });
         setShowNewCustomer(false);
+        setShowCustomerDropdown(false);
         setNewCustomer({ name: "", email: "", phone: "", location: "" });
       } else {
-        toast.error(result.error);
+        toast.error(result.error || "Failed to create customer");
       }
-    } catch {
+    } catch (e) {
+      console.error("Create customer error:", e);
       toast.error("Failed to create customer");
     } finally {
       setCreating(false);
@@ -152,24 +165,32 @@ export default function CreateOrderPage() {
   };
 
   // ─── Product search ───────────────────────────────────
-  const searchProductsDebounced = useCallback(async (q: string) => {
+  const searchProductsFn = useCallback(async (q: string) => {
+    setProductLoading(true);
     try {
       const results = await searchProductsForOrder(q);
       setProducts(results as any);
-    } catch {
+      setShowProductDropdown(true);
+    } catch (e) {
+      console.error("Product search error:", e);
       setProducts([]);
+    } finally {
+      setProductLoading(false);
     }
   }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      searchProductsDebounced(productQuery);
+      searchProductsFn(productQuery);
     }, 300);
     return () => clearTimeout(timer);
-  }, [productQuery, searchProductsDebounced]);
+  }, [productQuery, searchProductsFn]);
 
   const handleAddProduct = (product: ProductResult) => {
-    const defaultCost = Number(product.buyingPrice ?? 0) + Number(product.shippingCost ?? 0) + Number(product.handlerCost ?? 0);
+    const defaultCost =
+      Number(product.buyingPrice ?? 0) +
+      Number(product.shippingCost ?? 0) +
+      Number(product.handlerCost ?? 0);
     setOrderItems((prev) => {
       const existing = prev.find((i) => i.productId === product.id);
       if (existing) {
@@ -245,9 +266,10 @@ export default function CreateOrderPage() {
         toast.success("Order created!");
         router.push(`/admin/orders/${result.data.id}`);
       } else {
-        toast.error(result.error);
+        toast.error(result.error || "Failed to create order");
       }
-    } catch {
+    } catch (e) {
+      console.error("Create order error:", e);
       toast.error("Failed to create order");
     } finally {
       setSubmitting(false);
@@ -332,6 +354,7 @@ export default function CreateOrderPage() {
                   onClick={() => {
                     setSelectedCustomer(null);
                     setCustomerQuery("");
+                    setShowCustomerDropdown(false);
                   }}
                   className="text-sm text-gray-500 hover:text-red-600"
                 >
@@ -341,120 +364,145 @@ export default function CreateOrderPage() {
             </div>
           ) : null}
 
-          {!selectedCustomer || showNewCustomer ? (
-            <>
-              <div ref={customerRef} className="relative mb-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search customers by name, email or phone..."
-                    value={customerQuery}
-                    onChange={(e) => {
-                      setCustomerQuery(e.target.value);
-                      setShowCustomerDropdown(true);
-                    }}
-                    onFocus={() => {
-                      if (customerQuery.trim()) setShowCustomerDropdown(true);
-                    }}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40 focus:border-brand"
-                  />
-                </div>
-
-                {showCustomerDropdown && customers.length > 0 && (
-                  <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                    {customers.map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => handleSelectCustomer(c)}
-                        className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 border-b border-gray-100 last:border-0"
-                      >
-                        <div className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center text-sm font-medium">
-                          {(c.name ?? "?")[0].toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{c.name}</p>
-                          <p className="text-xs text-gray-500">{c.email}{c.phone ? ` · ${c.phone}` : ""}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="text-center">
-                <button
-                  onClick={() => setShowNewCustomer(true)}
-                  className="inline-flex items-center gap-2 text-sm text-brand hover:text-brand/80 font-medium"
-                >
-                  <UserPlus className="h-4 w-4" />
-                  Create new customer
-                </button>
-              </div>
-
-              {showNewCustomer && (
-                <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">New Customer</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                    <input
-                      type="text"
-                      placeholder="Name *"
-                      value={newCustomer.name}
-                      onChange={(e) =>
-                        setNewCustomer((prev) => ({ ...prev, name: e.target.value }))
-                      }
-                      className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
-                    />
-                    <input
-                      type="email"
-                      placeholder="Email *"
-                      value={newCustomer.email}
-                      onChange={(e) =>
-                        setNewCustomer((prev) => ({ ...prev, email: e.target.value }))
-                      }
-                      className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
-                    />
-                    <input
-                      type="tel"
-                      placeholder="Phone"
-                      value={newCustomer.phone}
-                      onChange={(e) =>
-                        setNewCustomer((prev) => ({ ...prev, phone: e.target.value }))
-                      }
-                      className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Location"
-                      value={newCustomer.location}
-                      onChange={(e) =>
-                        setNewCustomer((prev) => ({ ...prev, location: e.target.value }))
-                      }
-                      className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
-                    />
-                  </div>
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      onClick={() => {
-                        setShowNewCustomer(false);
-                        setNewCustomer({ name: "", email: "", phone: "", location: "" });
-                      }}
-                      className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleCreateCustomer}
-                      disabled={creating}
-                      className="px-4 py-2 text-sm bg-brand text-white rounded-lg hover:opacity-90 disabled:opacity-50"
-                    >
-                      {creating ? "Creating..." : "Create & Select"}
-                    </button>
-                  </div>
+          <div ref={customerRef} className="relative mb-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search customers by name, email or phone..."
+                value={customerQuery}
+                onChange={(e) => {
+                  setCustomerQuery(e.target.value);
+                }}
+                onFocus={() => {
+                  if (customers.length > 0) setShowCustomerDropdown(true);
+                }}
+                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40 focus:border-brand"
+              />
+              {customerLoading && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div className="w-4 h-4 border-2 border-brand border-t-transparent rounded-full animate-spin" />
                 </div>
               )}
-            </>
-          ) : null}
+            </div>
+
+            {showCustomerDropdown && customers.length > 0 && (
+              <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                {customers.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => handleSelectCustomer(c)}
+                    className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 border-b border-gray-100 last:border-0"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center text-sm font-medium">
+                      {(c.name ?? "?")[0].toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{c.name}</p>
+                      <p className="text-xs text-gray-500">
+                        {c.email}
+                        {c.phone ? ` · ${c.phone}` : ""}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {showCustomerDropdown && customers.length === 0 && !customerLoading && customerQuery.trim() && (
+              <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-center">
+                <p className="text-sm text-gray-500">No customers found</p>
+              </div>
+            )}
+          </div>
+
+          {!showNewCustomer && (
+            <div className="text-center">
+              <button
+                onClick={() => {
+                  setShowNewCustomer(true);
+                  setShowCustomerDropdown(false);
+                }}
+                className="inline-flex items-center gap-2 text-sm text-brand hover:text-brand/80 font-medium"
+              >
+                <UserPlus className="h-4 w-4" />
+                Create new customer
+              </button>
+            </div>
+          )}
+
+          {showNewCustomer && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-700">New Customer</h3>
+                <button
+                  onClick={() => {
+                    setShowNewCustomer(false);
+                    setNewCustomer({ name: "", email: "", phone: "", location: "" });
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                <input
+                  type="text"
+                  placeholder="Name *"
+                  value={newCustomer.name}
+                  onChange={(e) =>
+                    setNewCustomer((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
+                />
+                <input
+                  type="email"
+                  placeholder="Email *"
+                  value={newCustomer.email}
+                  onChange={(e) =>
+                    setNewCustomer((prev) => ({ ...prev, email: e.target.value }))
+                  }
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
+                />
+                <input
+                  type="tel"
+                  placeholder="Phone"
+                  value={newCustomer.phone}
+                  onChange={(e) =>
+                    setNewCustomer((prev) => ({ ...prev, phone: e.target.value }))
+                  }
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
+                />
+                <input
+                  type="text"
+                  placeholder="Location"
+                  value={newCustomer.location}
+                  onChange={(e) =>
+                    setNewCustomer((prev) => ({ ...prev, location: e.target.value }))
+                  }
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => {
+                    setShowNewCustomer(false);
+                    setNewCustomer({ name: "", email: "", phone: "", location: "" });
+                  }}
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateCustomer}
+                  disabled={creating}
+                  className="px-4 py-2 text-sm bg-brand text-white rounded-lg hover:opacity-90 disabled:opacity-50"
+                >
+                  {creating ? "Creating..." : "Create & Select"}
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end mt-6">
             <button
@@ -483,11 +531,17 @@ export default function CreateOrderPage() {
                   value={productQuery}
                   onChange={(e) => {
                     setProductQuery(e.target.value);
-                    setShowProductDropdown(true);
                   }}
-                  onFocus={() => setShowProductDropdown(true)}
+                  onFocus={() => {
+                    if (products.length > 0) setShowProductDropdown(true);
+                  }}
                   className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40 focus:border-brand"
                 />
+                {productLoading && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <div className="w-4 h-4 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                  </div>
+                )}
               </div>
 
               {showProductDropdown && products.length > 0 && (
@@ -500,7 +554,11 @@ export default function CreateOrderPage() {
                     >
                       <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
                         {p.images[0] ? (
-                          <img src={p.images[0].url} alt="" className="w-full h-full object-cover" />
+                          <img
+                            src={p.images[0].url}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
                             <Package className="h-4 w-4 text-gray-400" />
@@ -508,10 +566,13 @@ export default function CreateOrderPage() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {p.name}
+                        </p>
                         {p.brand && (
                           <p className="text-xs text-gray-500 truncate">
-                            {p.brand}{p.model ? ` / ${p.model}` : ""}
+                            {p.brand}
+                            {p.model ? ` / ${p.model}` : ""}
                           </p>
                         )}
                       </div>
@@ -520,6 +581,12 @@ export default function CreateOrderPage() {
                       </span>
                     </button>
                   ))}
+                </div>
+              )}
+
+              {showProductDropdown && products.length === 0 && !productLoading && productQuery.trim() && (
+                <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-center">
+                  <p className="text-sm text-gray-500">No products found</p>
                 </div>
               )}
             </div>
@@ -549,7 +616,11 @@ export default function CreateOrderPage() {
                     >
                       <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-200 flex-shrink-0">
                         {item.imageUrl ? (
-                          <img src={item.imageUrl} alt="" className="w-full h-full object-cover" />
+                          <img
+                            src={item.imageUrl}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
                             <Package className="h-5 w-5 text-gray-400" />
@@ -557,10 +628,13 @@ export default function CreateOrderPage() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900">{item.productName}</p>
+                        <p className="text-sm font-medium text-gray-900">
+                          {item.productName}
+                        </p>
                         {item.productBrand && (
                           <p className="text-xs text-gray-500">
-                            {item.productBrand}{item.productModel ? ` / ${item.productModel}` : ""}
+                            {item.productBrand}
+                            {item.productModel ? ` / ${item.productModel}` : ""}
                           </p>
                         )}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
@@ -582,7 +656,7 @@ export default function CreateOrderPage() {
                           </div>
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">
-                              Selling Price
+                              Selling Price (LKR)
                             </label>
                             <input
                               type="number"
@@ -617,7 +691,9 @@ export default function CreateOrderPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs text-gray-500 mb-1">Discount</label>
+                            <label className="block text-xs text-gray-500 mb-1">
+                              Discount
+                            </label>
                             <input
                               type="number"
                               min={0}
@@ -636,8 +712,19 @@ export default function CreateOrderPage() {
                         </div>
                         <div className="flex items-center justify-between mt-2">
                           <div className="flex gap-4 text-xs text-gray-600">
-                            <span>Line total: <strong>{fmt(lineTotal)}</strong></span>
-                            <span>Profit: <strong className={lineProfit >= 0 ? "text-green-600" : "text-red-600"}>{fmt(lineProfit)}</strong></span>
+                            <span>
+                              Line total: <strong>{fmt(lineTotal)}</strong>
+                            </span>
+                            <span>
+                              Profit:{" "}
+                              <strong
+                                className={
+                                  lineProfit >= 0 ? "text-green-600" : "text-red-600"
+                                }
+                              >
+                                {fmt(lineProfit)}
+                              </strong>
+                            </span>
                           </div>
                           <button
                             onClick={() => handleRemoveItem(item.productId)}
@@ -700,7 +787,11 @@ export default function CreateOrderPage() {
                   >
                     <div className="w-10 h-10 rounded overflow-hidden bg-gray-100 flex-shrink-0">
                       {item.imageUrl ? (
-                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" />
+                        <img
+                          src={item.imageUrl}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
                           <Package className="h-4 w-4 text-gray-400" />
@@ -708,17 +799,20 @@ export default function CreateOrderPage() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900">{item.productName}</p>
+                      <p className="text-sm font-medium text-gray-900">
+                        {item.productName}
+                      </p>
                       <p className="text-xs text-gray-500">
-                        {item.productBrand}{item.productModel ? ` / ${item.productModel}` : ""} × {item.quantity}
+                        {item.productBrand}
+                        {item.productModel ? ` / ${item.productModel}` : ""} × {item.quantity}
                       </p>
                     </div>
                     <div className="text-right text-sm">
-                      <p className="font-medium text-gray-900">
-                        {item.price > item.discount ? fmt(finalPrice) : fmt(lineTotal)}
-                      </p>
+                      <p className="font-medium text-gray-900">{fmt(finalPrice)}</p>
                       {item.discount > 0 && (
-                        <p className="text-xs text-green-600">-{fmt(lineDiscount)} discount</p>
+                        <p className="text-xs text-green-600">
+                          -{fmt(lineDiscount)} discount
+                        </p>
                       )}
                     </div>
                   </div>
@@ -745,7 +839,9 @@ export default function CreateOrderPage() {
               <div className="pt-2 border-t border-gray-200 flex justify-between">
                 <span className="font-semibold text-gray-900">Total Profit</span>
                 <span
-                  className={`font-semibold ${totalProfit >= 0 ? "text-green-600" : "text-red-600"}`}
+                  className={`font-semibold ${
+                    totalProfit >= 0 ? "text-green-600" : "text-red-600"
+                  }`}
                 >
                   {fmt(totalProfit)}
                 </span>

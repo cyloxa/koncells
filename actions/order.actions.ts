@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -43,7 +43,7 @@ export async function createCheckoutSession(addressId: string) {
   const total = subtotal + shippingCost + tax;
 
   // Create Stripe payment intent
-  const paymentIntent = await stripe.paymentIntents.create({
+  const paymentIntent = await getStripe().paymentIntents.create({
     amount: Math.round(total * 100),
     currency: "usd",
     metadata: {
@@ -278,5 +278,28 @@ export async function getAdminOrderById(id: string) {
     },
   });
 
-  return order;
+  if (!order) return null;
+
+  return {
+    ...order,
+    subtotal: Number(order.subtotal),
+    shippingCost: Number(order.shippingCost),
+    tax: Number(order.tax),
+    total: Number(order.total),
+    totalCosts: order.totalCosts ? Number(order.totalCosts) : null,
+    totalProfit: order.totalProfit ? Number(order.totalProfit) : null,
+    items: order.items.map((item) => ({
+      ...item,
+      price: Number(item.price),
+      costs: item.costs ? Number(item.costs) : null,
+      profit: item.profit ? Number(item.profit) : null,
+      discount: item.discount ? Number(item.discount) : null,
+      product: {
+        ...item.product,
+        buyingPrice: item.product.buyingPrice ? Number(item.product.buyingPrice) : null,
+        shippingCost: item.product.shippingCost ? Number(item.product.shippingCost) : null,
+        handlerCost: item.product.handlerCost ? Number(item.product.handlerCost) : null,
+      },
+    })),
+  };
 }

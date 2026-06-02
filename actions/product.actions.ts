@@ -120,49 +120,52 @@ export async function getProductById(id: string) {
 }
 
 export async function searchProductsForOrder(query: string) {
-  if (!query.trim()) {
-    return prisma.product.findMany({
-      where: { isActive: true },
-      select: {
-        id: true,
-        name: true,
-        brand: true,
-        model: true,
-        price: true,
-        buyingPrice: true,
-        shippingCost: true,
-        handlerCost: true,
-        images: { orderBy: { position: "asc" }, take: 1 },
-      },
-      orderBy: { name: "asc" },
-      take: 20,
-    });
-  }
+  const select = {
+    id: true,
+    name: true,
+    brand: true,
+    model: true,
+    price: true,
+    buyingPrice: true,
+    shippingCost: true,
+    handlerCost: true,
+    images: { orderBy: { position: "asc" }, take: 1 },
+  } as const;
 
-  return prisma.product.findMany({
-    where: {
-      isActive: true,
-      OR: [
-        { name: { contains: query, mode: "insensitive" } },
-        { brand: { contains: query, mode: "insensitive" } },
-        { model: { contains: query, mode: "insensitive" } },
-        { sku: { contains: query, mode: "insensitive" } },
-      ],
-    },
-    select: {
-      id: true,
-      name: true,
-      brand: true,
-      model: true,
-      price: true,
-      buyingPrice: true,
-      shippingCost: true,
-      handlerCost: true,
-      images: { orderBy: { position: "asc" }, take: 1 },
-    },
-    orderBy: { name: "asc" },
-    take: 20,
-  });
+  const results = !query.trim()
+    ? await prisma.product.findMany({
+        where: { isActive: true },
+        select,
+        orderBy: { name: "asc" },
+        take: 20,
+      })
+    : await prisma.product.findMany({
+        where: {
+          isActive: true,
+          OR: [
+            { name: { contains: query, mode: "insensitive" } },
+            { brand: { contains: query, mode: "insensitive" } },
+            { model: { contains: query, mode: "insensitive" } },
+            { sku: { contains: query, mode: "insensitive" } },
+          ],
+        },
+        select,
+        orderBy: { name: "asc" },
+        take: 20,
+      });
+
+  // Convert Decimal to number for client component serialization
+  return results.map((p) => ({
+    id: p.id,
+    name: p.name,
+    brand: p.brand,
+    model: p.model,
+    price: Number(p.price),
+    buyingPrice: Number(p.buyingPrice),
+    shippingCost: Number(p.shippingCost),
+    handlerCost: Number(p.handlerCost),
+    images: p.images,
+  }));
 }
 
 type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
