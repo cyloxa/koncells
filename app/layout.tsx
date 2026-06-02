@@ -10,11 +10,11 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "CYLOXA Store — Premium Products",
-    template: "%s | CYLOXA Store",
+    default: "Koncells Store — Premium Products",
+    template: "%s | Koncells Store",
   },
   description:
-    "Discover premium electronics, clothing, and home goods at CYLOXA. Fast shipping, easy returns, and secure checkout.",
+    "Discover premium electronics, clothing, and home goods at Koncells. Fast shipping, easy returns, and secure checkout.",
   keywords: ["ecommerce", "online store", "electronics", "clothing", "home decor"],
 };
 

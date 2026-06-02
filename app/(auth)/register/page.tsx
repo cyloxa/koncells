@@ -11,7 +11,7 @@ export default async function RegisterPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900">Create your account</h1>
-          <p className="text-gray-600 mt-2">Join CYLOXA and start shopping</p>
+          <p className="text-gray-600 mt-2">Join Koncells and start shopping</p>
         </div>
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
           <RegisterForm />

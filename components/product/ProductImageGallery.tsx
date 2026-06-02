@@ -8,6 +8,7 @@ interface ProductImage {
   id: string;
   url: string;
   alt: string | null;
+  title?: string | null;
 }
 
 interface ProductImageGalleryProps {
@@ -48,6 +49,8 @@ export function ProductImageGallery({ images, productName }: ProductImageGallery
         <img
           src={current.url}
           alt={current.alt ?? productName}
+          title={current.title ?? productName}
+          fetchPriority={currentIndex === 0 ? "high" : undefined}
           className={cn(
             "h-full w-full object-cover transition-transform duration-300",
             isZoomed && "scale-150"
@@ -90,13 +93,15 @@ export function ProductImageGallery({ images, productName }: ProductImageGallery
               className={cn(
                 "relative flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 transition-all",
                 index === currentIndex
-                  ? "border-indigo-600"
+                  ? "border-brand"
                   : "border-transparent hover:border-gray-300"
               )}
             >
               <img
                 src={image.url}
                 alt={image.alt ?? `${productName} thumbnail ${index + 1}`}
+                title={image.title ?? `${productName} thumbnail ${index + 1}`}
+                loading={index === 0 ? "eager" : "lazy"}
                 className="h-full w-full object-cover"
               />
             </button>

@@ -64,9 +64,9 @@ export function ProductCard({
       {/* Content */}
       <div className="p-4">
         {category && (
-          <p className="text-xs font-medium text-indigo-600 mb-1">{category.name}</p>
+          <p className="text-xs font-medium text-brand mb-1">{category.name}</p>
         )}
-        <h3 className="font-medium text-gray-900 line-clamp-2 group-hover:text-indigo-600 transition-colors">
+        <h3 className="font-medium text-gray-900 line-clamp-2 group-hover:text-brand transition-colors">
           {name}
         </h3>
         <div className="mt-2">

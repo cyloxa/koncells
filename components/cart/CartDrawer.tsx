@@ -55,7 +55,7 @@ export function CartDrawer() {
             <Link
               href="/products"
               onClick={closeCart}
-              className="mt-6 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+              className="mt-6 inline-flex items-center justify-center rounded-lg bg-brand px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-dark transition-colors"
             >
               Browse Products
             </Link>
@@ -88,7 +88,7 @@ export function CartDrawer() {
                     <Link
                       href={`/products/${item.slug}`}
                       onClick={closeCart}
-                      className="text-sm font-medium text-gray-900 hover:text-indigo-600 line-clamp-1 transition-colors"
+                      className="text-sm font-medium text-gray-900 hover:text-brand line-clamp-1 transition-colors"
                     >
                       {item.name}
                     </Link>
@@ -148,7 +148,7 @@ export function CartDrawer() {
               <Link
                 href="/checkout"
                 onClick={closeCart}
-                className="block w-full text-center rounded-lg bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors"
+                className="block w-full text-center rounded-lg bg-brand px-6 py-3 text-sm font-semibold text-white hover:bg-brand-dark transition-colors"
               >
                 Proceed to Checkout
               </Link>

@@ -25,7 +25,7 @@ export default function CartPage() {
         </div>
         <Link
           href="/products"
-          className="text-sm font-medium text-indigo-600 hover:text-indigo-500 flex items-center gap-1"
+          className="text-sm font-medium text-brand hover:text-brand flex items-center gap-1"
         >
           <ArrowLeft className="h-4 w-4" />
           Continue Shopping

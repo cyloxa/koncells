@@ -66,7 +66,7 @@ export function LoginForm() {
             type="email"
             autoComplete="email"
             required
-            className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+            className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition-all"
             placeholder="you@example.com"
           />
         </div>
@@ -84,7 +84,7 @@ export function LoginForm() {
             type="password"
             autoComplete="current-password"
             required
-            className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+            className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition-all"
             placeholder="••••••••"
           />
         </div>
@@ -132,7 +132,7 @@ export function LoginForm() {
 
       <p className="text-center text-sm text-gray-600">
         Don't have an account?{" "}
-        <Link href="/register" className="font-medium text-indigo-600 hover:text-indigo-500">
+        <Link href="/register" className="font-medium text-brand hover:text-brand-dark">
           Sign up
         </Link>
       </p>

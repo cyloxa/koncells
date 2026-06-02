@@ -2,13 +2,37 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { BarChart3, Package, ShoppingCart, Users, DollarSign } from "lucide-react";
+import {
+  BarChart3,
+  Package,
+  ShoppingCart,
+  Users,
+  DollarSign,
+  TrendingUp,
+  TrendingDown,
+  ArrowUpRight,
+} from "lucide-react";
 
 export default async function AdminPage() {
   const session = await auth();
   if (!session?.user || session.user.role !== "ADMIN") redirect("/login");
 
-  const [totalProducts, totalOrders, totalUsers, recentOrders] = await Promise.all([
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const [
+    totalProducts,
+    totalOrders,
+    totalUsers,
+    recentOrders,
+    recentUsers,
+    lastMonthOrders,
+    topProducts,
+    ordersByStatus,
+    activeProducts,
+    lowStockProducts,
+    totalReviews,
+  ] = await Promise.all([
     prisma.product.count(),
     prisma.order.count(),
     prisma.user.count(),
@@ -17,8 +41,37 @@ export default async function AdminPage() {
       orderBy: { createdAt: "desc" },
       include: {
         user: { select: { name: true, email: true } },
+        items: { select: { quantity: true } },
       },
     }),
+    prisma.user.findMany({
+      take: 5,
+      orderBy: { createdAt: "desc" },
+      select: { id: true, name: true, email: true, createdAt: true, role: true },
+    }),
+    prisma.order.count({
+      where: { createdAt: { gte: thirtyDaysAgo } },
+    }),
+    prisma.product.findMany({
+      take: 5,
+      orderBy: { orderItems: { _count: "desc" } },
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        stock: true,
+        images: { take: 1, orderBy: { position: "asc" }, select: { url: true } },
+        _count: { select: { orderItems: true, reviews: true } },
+      },
+    }),
+    prisma.order.groupBy({
+      by: ["status"],
+      _count: { id: true },
+      _sum: { total: true },
+    }),
+    prisma.product.count({ where: { isActive: true } }),
+    prisma.product.count({ where: { stock: { lte: 5 }, isActive: true } }),
+    prisma.review.count(),
   ]);
 
   const totalRevenue = await prisma.order.aggregate({
@@ -26,19 +79,39 @@ export default async function AdminPage() {
     where: { status: { not: "CANCELLED" } },
   });
 
+  const lastMonthRevenue = await prisma.order.aggregate({
+    _sum: { total: true },
+    where: {
+      status: { not: "CANCELLED" },
+      createdAt: { gte: thirtyDaysAgo },
+    },
+  });
+
+  const revenue = Number(totalRevenue._sum.total ?? 0);
+  const lastMonthRev = Number(lastMonthRevenue._sum.total ?? 0);
+  const revenueChange =
+    lastMonthRev > 0
+      ? Math.round(((revenue - lastMonthRev) / lastMonthRev) * 100)
+      : 0;
+
   const stats = [
     {
       label: "Total Revenue",
-      value: new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
-        Number(totalRevenue._sum.total ?? 0)
-      ),
+      value: new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+      }).format(revenue),
+      sub: `${revenueChange >= 0 ? "+" : ""}${revenueChange}% vs last 30 days`,
       icon: DollarSign,
       color: "text-green-600",
       bg: "bg-green-100",
+      trend: revenueChange >= 0 ? TrendingUp : TrendingDown,
+      trendColor: revenueChange >= 0 ? "text-green-600" : "text-red-600",
     },
     {
       label: "Total Products",
       value: totalProducts,
+      sub: `${activeProducts} active, ${lowStockProducts} low stock`,
       icon: Package,
       color: "text-blue-600",
       bg: "bg-blue-100",
@@ -46,6 +119,7 @@ export default async function AdminPage() {
     {
       label: "Total Orders",
       value: totalOrders,
+      sub: `${lastMonthOrders} in last 30 days`,
       icon: ShoppingCart,
       color: "text-purple-600",
       bg: "bg-purple-100",
@@ -53,6 +127,7 @@ export default async function AdminPage() {
     {
       label: "Total Users",
       value: totalUsers,
+      sub: `${totalReviews} reviews written`,
       icon: Users,
       color: "text-orange-600",
       bg: "bg-orange-100",
@@ -60,93 +135,273 @@ export default async function AdminPage() {
   ];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-          <p className="text-gray-600 mt-1">Overview of your store</p>
+          <h1 className="text-2xl font-bold text-gray-900">Super Admin Dashboard</h1>
+          <p className="text-gray-600 text-sm mt-1">
+            Comprehensive overview of your store performance
+          </p>
         </div>
-        <Link
-          href="/admin/products"
-          className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
-        >
-          Manage Products →
-        </Link>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-400">
+            Last updated: {now.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })}
+          </span>
+        </div>
       </div>
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {stats.map((stat) => (
-          <div key={stat.label} className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center gap-4">
+          <div
+            key={stat.label}
+            className="bg-white rounded-xl border border-gray-200 p-6 hover:shadow-sm transition-shadow"
+          >
+            <div className="flex items-start justify-between">
               <div className={`p-3 rounded-lg ${stat.bg}`}>
                 <stat.icon className={`h-6 w-6 ${stat.color}`} />
               </div>
-              <div>
-                <p className="text-sm text-gray-600">{stat.label}</p>
-                <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-              </div>
+              {"trend" in stat && stat.trend && (
+                <stat.trend className={`h-4 w-4 ${stat.trendColor}`} />
+              )}
+            </div>
+            <div className="mt-4">
+              <p className="text-sm text-gray-600">{stat.label}</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
+              <p className="text-xs text-gray-500 mt-1">{stat.sub}</p>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Recent orders */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        {/* Orders by Status */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Orders by Status</h2>
+          <div className="space-y-3">
+            {ordersByStatus.length === 0 ? (
+              <p className="text-sm text-gray-500">No orders yet.</p>
+            ) : (
+              ordersByStatus.map((status) => {
+                const statusColors: Record<string, string> = {
+                  PENDING: "bg-yellow-100 text-yellow-700 border-yellow-200",
+                  PROCESSING: "bg-blue-100 text-blue-700 border-blue-200",
+                  SHIPPED: "bg-purple-100 text-purple-700 border-purple-200",
+                  DELIVERED: "bg-green-100 text-green-700 border-green-200",
+                  CANCELLED: "bg-red-100 text-red-700 border-red-200",
+                };
+                return (
+                  <div
+                    key={status.status}
+                    className={`flex items-center justify-between p-3 rounded-lg border ${statusColors[status.status] ?? "bg-gray-100 text-gray-700 border-gray-200"}`}
+                  >
+                    <span className="text-sm font-medium">{status.status}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-bold">{status._count.id}</span>
+                      <span className="text-xs opacity-75">
+                        {new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: "USD",
+                        }).format(Number(status._sum.total ?? 0))}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Top Products */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Top Products</h2>
+            <Link
+              href="/admin/products"
+              className="text-xs text-brand hover:text-brand"
+            >
+              View All
+            </Link>
+          </div>
+          {topProducts.length === 0 ? (
+            <p className="text-sm text-gray-500">No products yet.</p>
+          ) : (
+            <div className="space-y-4">
+              {topProducts.map((product, index) => (
+                <div key={product.id} className="flex items-center gap-3">
+                  <span className="text-xs font-bold text-gray-400 w-5">
+                    {index + 1}.
+                  </span>
+                  {product.images[0] ? (
+                    <img
+                      src={product.images[0].url}
+                      alt={product.name}
+                      className="h-8 w-8 rounded-lg object-cover"
+                    />
+                  ) : (
+                    <div className="h-8 w-8 rounded-lg bg-gray-200" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {product.name}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {product._count.orderItems} sold &middot; {product._count.reviews} reviews
+                    </p>
+                  </div>
+                  <span className="text-sm font-medium text-gray-900">
+                    {new Intl.NumberFormat("en-US", {
+                      style: "currency",
+                      currency: "USD",
+                    }).format(Number(product.price))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Recent Users */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Recent Users</h2>
+            <Link
+              href="/admin/customers"
+              className="text-xs text-brand hover:text-brand"
+            >
+              View All
+            </Link>
+          </div>
+          {recentUsers.length === 0 ? (
+            <p className="text-sm text-gray-500">No users yet.</p>
+          ) : (
+            <div className="space-y-4">
+              {recentUsers.map((user) => (
+                <div key={user.id} className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-full bg-brand-light flex items-center justify-center flex-shrink-0">
+                    <span className="text-xs font-medium text-brand">
+                      {user.name?.charAt(0)?.toUpperCase() ?? "U"}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {user.name ?? "Unknown"}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${
+                        user.role === "ADMIN"
+                          ? "bg-purple-100 text-purple-700"
+                          : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {user.role}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      {new Date(user.createdAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Recent Orders Table */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="flex items-center justify-between p-6 pb-4">
           <h2 className="text-lg font-semibold text-gray-900">Recent Orders</h2>
           <Link
             href="/admin/orders"
-            className="text-sm text-indigo-600 hover:text-indigo-500"
+            className="text-sm text-brand hover:text-brand inline-flex items-center gap-1"
           >
             View All
+            <ArrowUpRight className="h-3 w-3" />
           </Link>
         </div>
         {recentOrders.length === 0 ? (
-          <p className="text-gray-500 text-sm">No orders yet.</p>
+          <p className="text-gray-500 text-sm px-6 pb-6">No orders yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left py-3 px-4 font-medium text-gray-600">Order ID</th>
+                <tr className="border-t border-gray-200 bg-gray-50">
+                  <th className="text-left py-3 px-4 font-medium text-gray-600">Order</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-600">Customer</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-600">Items</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-600">Status</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-600">Total</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-600">Date</th>
                 </tr>
               </thead>
               <tbody>
-                {recentOrders.map((order) => (
-                  <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-4 font-mono text-xs">{order.id.slice(0, 8)}...</td>
-                    <td className="py-3 px-4">{order.user.name ?? order.user.email}</td>
-                    <td className="py-3 px-4">
-                      <span
-                        className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                          order.status === "DELIVERED"
-                            ? "bg-green-100 text-green-700"
-                            : order.status === "PROCESSING"
-                            ? "bg-blue-100 text-blue-700"
-                            : order.status === "CANCELLED"
-                            ? "bg-red-100 text-red-700"
-                            : "bg-yellow-100 text-yellow-700"
-                        }`}
-                      >
-                        {order.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      {new Intl.NumberFormat("en-US", {
-                        style: "currency",
-                        currency: "USD",
-                      }).format(Number(order.total))}
-                    </td>
-                    <td className="py-3 px-4 text-right text-gray-500">
-                      {new Date(order.createdAt).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
+                {recentOrders.map((order) => {
+                  const statusColors: Record<string, string> = {
+                    PENDING: "bg-yellow-100 text-yellow-700",
+                    PROCESSING: "bg-blue-100 text-blue-700",
+                    SHIPPED: "bg-purple-100 text-purple-700",
+                    DELIVERED: "bg-green-100 text-green-700",
+                    CANCELLED: "bg-red-100 text-red-700",
+                  };
+                  const itemCount = order.items.reduce(
+                    (sum, item) => sum + item.quantity,
+                    0
+                  );
+                  return (
+                    <tr
+                      key={order.id}
+                      className="border-b border-gray-100 hover:bg-gray-50"
+                    >
+                      <td className="py-3 px-4">
+                        <Link
+                          href={`/admin/orders/${order.id}`}
+                          className="font-mono text-xs text-brand hover:text-brand"
+                        >
+                          #{order.id.slice(0, 8)}
+                        </Link>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="font-medium text-gray-900">
+                          {order.user.name ?? order.user.email}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-gray-600">{itemCount}</td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                            statusColors[order.status] ?? "bg-gray-100 text-gray-700"
+                          }`}
+                        >
+                          {order.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right font-medium">
+                        {new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: "USD",
+                        }).format(Number(order.total))}
+                      </td>
+                      <td className="py-3 px-4 text-right text-gray-500">
+                        {new Date(order.createdAt).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

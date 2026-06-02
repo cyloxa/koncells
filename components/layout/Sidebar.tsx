@@ -55,7 +55,7 @@ export function Sidebar({ items, title = "Menu" }: Readonly<SidebarProps>) {
                   className={cn(
                     "flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors",
                     pathname === item.href
-                      ? "bg-indigo-50 text-indigo-700 font-medium"
+                      ? "bg-brand-light text-brand font-medium"
                       : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                   )}
                 >

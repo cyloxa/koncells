@@ -13,7 +13,7 @@ export default async function HomePage() {
   return (
     <div>
       {/* Hero */}
-      <section className="relative bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 text-white">
+      <section className="relative bg-gradient-to-br from-brand via-purple-600 to-pink-500 text-white">
         <div className="absolute inset-0 bg-black/20" />
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 md:py-32">
           <div className="max-w-2xl">
@@ -28,7 +28,7 @@ export default async function HomePage() {
               <Link href="/products">
                 <Button
                   size="lg"
-                  className="bg-white text-indigo-600 hover:bg-gray-100"
+                  className="bg-white text-brand hover:bg-gray-100"
                 >
                   Shop All Products
                   <ArrowRight className="ml-2 h-4 w-4" />
@@ -53,8 +53,8 @@ export default async function HomePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="flex items-start gap-4">
-              <div className="p-3 rounded-lg bg-indigo-100">
-                <Truck className="h-6 w-6 text-indigo-600" />
+              <div className="p-3 rounded-lg bg-brand-light">
+                <Truck className="h-6 w-6 text-brand" />
               </div>
               <div>
                 <h3 className="font-semibold text-gray-900">Free Shipping</h3>
@@ -103,7 +103,7 @@ export default async function HomePage() {
             </div>
             <Link
               href="/products?featured=true"
-              className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+              className="text-sm font-medium text-brand hover:text-brand"
             >
               View All
               <ArrowRight className="inline ml-1 h-4 w-4" />
@@ -166,15 +166,15 @@ export default async function HomePage() {
 
       {/* CTA */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="bg-indigo-600 rounded-2xl p-8 md:p-12 text-center text-white">
+        <div className="bg-brand rounded-2xl p-8 md:p-12 text-center text-white">
           <h2 className="text-2xl md:text-3xl font-bold">Ready to upgrade your lifestyle?</h2>
-          <p className="mt-4 text-lg text-indigo-100 max-w-2xl mx-auto">
-            Join thousands of happy customers who trust CYLOXA for their shopping needs.
+          <p className="mt-4 text-lg text-white/80 max-w-2xl mx-auto">
+            Join thousands of happy customers who trust Koncells for their shopping needs.
           </p>
           <Link href="/products" className="mt-8 inline-block">
             <Button
               size="lg"
-              className="bg-white text-indigo-600 hover:bg-gray-100"
+              className="bg-white text-brand hover:bg-gray-100"
             >
               Start Shopping Now
             </Button>

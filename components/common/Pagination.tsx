@@ -50,7 +50,7 @@ export function Pagination({ currentPage, totalPages, baseUrl, className }: Read
             className={cn(
               "min-w-[2.25rem] h-9 flex items-center justify-center rounded-lg text-sm font-medium transition-colors",
               page === currentPage
-                ? "bg-indigo-600 text-white"
+                ? "bg-brand text-white"
                 : "text-gray-600 hover:bg-gray-100"
             )}
           >

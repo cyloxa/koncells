@@ -32,8 +32,8 @@ export function Footer() {
           {/* Brand */}
           <div className="sm:col-span-2 lg:col-span-1">
             <Link href="/" className="flex items-center gap-2 font-bold text-xl text-white mb-4">
-              <Package className="h-6 w-6 text-indigo-400" />
-              <span>CYLOXA</span>
+              <Package className="h-6 w-6 text-brand" />
+              <span>Koncells</span>
             </Link>
             <p className="text-sm text-gray-400 leading-relaxed">
               Premium products for modern living. Fast shipping, easy returns, and exceptional customer service.
@@ -64,7 +64,7 @@ export function Footer() {
 
         <div className="mt-12 pt-8 border-t border-gray-800">
           <p className="text-sm text-gray-500 text-center">
-            &copy; {currentYear} CYLOXA. All rights reserved.
+            &copy; {currentYear} Koncells. All rights reserved.
           </p>
         </div>
       </div>

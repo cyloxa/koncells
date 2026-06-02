@@ -5,9 +5,58 @@ import { Price } from "@/components/common/Price";
 import { Breadcrumb } from "@/components/common/Breadcrumb";
 import { AddToCartButton } from "./AddToCartButton";
 import { Star, StarHalf } from "lucide-react";
+import type { Metadata } from "next";
 
 interface ProductPageProps {
   params: Promise<{ slug: string }>;
+}
+
+export async function generateMetadata({
+  params,
+}: ProductPageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const product = await getProductBySlug(slug);
+
+  if (!product) return { title: "Product Not Found" };
+
+  const siteName = "Koncells";
+  const metaTitle = product.metaTitle
+    ? `${product.metaTitle} | ${siteName}`
+    : `${product.name} | ${siteName}`;
+  const metaDescription =
+    product.metaDescription ||
+    product.description.slice(0, 160).replace(/\n/g, " ").trim();
+  const ogImageUrl = product.ogImage || product.images[0]?.url || "";
+
+  return {
+    title: metaTitle,
+    description: metaDescription,
+    openGraph: {
+      title: metaTitle,
+      description: metaDescription,
+      type: "website",
+      ...(ogImageUrl
+        ? {
+            images: [
+              {
+                url: ogImageUrl,
+                alt: product.name,
+                width: 1200,
+                height: 630,
+              },
+            ],
+          }
+        : {}),
+      siteName,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: metaTitle,
+      description: metaDescription,
+      ...(ogImageUrl ? { images: [ogImageUrl] } : {}),
+    },
+    robots: { index: true, follow: true },
+  };
 }
 
 export default async function ProductPage({ params }: ProductPageProps) {
@@ -39,7 +88,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
         {/* Details */}
         <div>
           {product.category && (
-            <p className="text-sm font-medium text-indigo-600 mb-2">
+            <p className="text-sm font-medium text-brand mb-2">
               {product.category.name}
             </p>
           )}
@@ -64,11 +113,18 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
           {/* Price */}
           <div className="mt-6">
-            <Price
-              price={Number(product.price)}
-              compareAtPrice={product.compareAtPrice ? Number(product.compareAtPrice) : null}
-              size="lg"
-            />
+            {product.showPrice && (
+              <Price
+                price={Number(product.price)}
+                compareAtPrice={product.compareAtPrice ? Number(product.compareAtPrice) : null}
+                size="lg"
+              />
+            )}
+            {!product.showPrice && (
+              <span className="text-lg font-semibold text-gray-900">
+                Contact for price
+              </span>
+            )}
           </div>
 
           {/* Stock info */}
@@ -108,6 +164,24 @@ export default async function ProductPage({ params }: ProductPageProps) {
               ))}
             </div>
           </div>
+
+          {/* Brand / Model */}
+          {(product.brand || product.model) && (
+            <div className="mt-6 grid grid-cols-2 gap-4 text-sm">
+              {product.brand && (
+                <div>
+                  <span className="text-gray-500">Brand:</span>{" "}
+                  <span className="font-medium text-gray-900">{product.brand}</span>
+                </div>
+              )}
+              {product.model && (
+                <div>
+                  <span className="text-gray-500">Model:</span>{" "}
+                  <span className="font-medium text-gray-900">{product.model}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -130,8 +204,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
                       className="h-10 w-10 rounded-full object-cover"
                     />
                   ) : (
-                    <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center">
-                      <span className="text-sm font-medium text-indigo-600">
+                    <div className="h-10 w-10 rounded-full bg-brand-light flex items-center justify-center">
+                      <span className="text-sm font-medium text-brand">
                         {review.user.name?.charAt(0)?.toUpperCase() ?? "U"}
                       </span>
                     </div>

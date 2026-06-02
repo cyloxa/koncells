@@ -49,8 +49,8 @@ export function Navbar() {
           {/* Logo */}
           <div className="flex items-center gap-8">
             <Link href="/" className="flex items-center gap-2 font-bold text-xl text-gray-900">
-              <Package className="h-6 w-6 text-indigo-600" />
-              <span>CYLOXA</span>
+              <Package className="h-6 w-6 text-brand" />
+              <span>Koncells</span>
             </Link>
 
             {/* Desktop Navigation */}
@@ -82,7 +82,7 @@ export function Navbar() {
             >
               <ShoppingCart className="h-5 w-5" />
               {itemCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex items-center justify-center h-5 w-5 rounded-full bg-indigo-600 text-white text-xs font-bold">
+                <span className="absolute -top-1 -right-1 flex items-center justify-center h-5 w-5 rounded-full bg-brand text-white text-xs font-bold">
                   {itemCount > 99 ? "99+" : itemCount}
                 </span>
               )}
@@ -102,8 +102,8 @@ export function Navbar() {
                       className="h-8 w-8 rounded-full object-cover"
                     />
                   ) : (
-                    <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center">
-                      <User className="h-4 w-4 text-indigo-600" />
+                    <div className="h-8 w-8 rounded-full bg-brand-light flex items-center justify-center">
+                      <User className="h-4 w-4 text-brand" />
                     </div>
                   )}
                 </button>
@@ -118,6 +118,14 @@ export function Navbar() {
                         {session.user.email ?? ""}
                       </p>
                     </div>
+                    <Link
+                      href="/profile"
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      onClick={() => setIsUserMenuOpen(false)}
+                    >
+                      <User className="h-4 w-4" />
+                      Profile
+                    </Link>
                     <Link
                       href="/orders"
                       className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"

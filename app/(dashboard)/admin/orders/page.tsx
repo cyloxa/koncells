@@ -36,6 +36,12 @@ export default async function AdminOrdersPage() {
             {orders.length} order{orders.length !== 1 ? "s" : ""}
           </p>
         </div>
+        <Link
+          href="/admin/orders/create"
+          className="px-4 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:opacity-90 transition-all"
+        >
+          + Create Order
+        </Link>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -57,7 +63,7 @@ export default async function AdminOrdersPage() {
                   <td className="py-3 px-4">
                     <Link
                       href={`/admin/orders/${order.id}`}
-                      className="font-mono text-xs text-indigo-600 hover:text-indigo-500"
+                      className="font-mono text-xs text-brand hover:text-brand"
                     >
                       #{order.id.slice(0, 8)}
                     </Link>

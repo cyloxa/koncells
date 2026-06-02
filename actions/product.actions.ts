@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { productSchema } from "@/types";
 import { revalidatePath } from "next/cache";
+import type { ProductInput } from "@/types";
 
 export async function getProducts(params?: {
   category?: string;
@@ -93,36 +94,203 @@ export async function getCategories() {
   });
 }
 
-export async function createProduct(data: FormData) {
-  const raw = Object.fromEntries(data.entries());
-  const parsed = productSchema.safeParse(raw);
-  if (!parsed.success) throw new Error(parsed.error.message);
-
-  const product = await prisma.product.create({
-    data: parsed.data,
+export async function getAllProducts() {
+  return prisma.product.findMany({
+    select: {
+      id: true,
+      name: true,
+      sku: true,
+    },
+    orderBy: { name: "asc" },
   });
-
-  revalidatePath("/admin/products");
-  revalidatePath("/products");
-  return product;
 }
 
-export async function updateProduct(id: string, data: FormData) {
-  const raw = Object.fromEntries(data.entries());
-  const parsed = productSchema.partial().safeParse(raw);
-  if (!parsed.success) throw new Error(parsed.error.message);
-
-  const product = await prisma.product.update({
+export async function getProductById(id: string) {
+  const product = await prisma.product.findUnique({
     where: { id },
-    data: parsed.data,
+    include: {
+      category: { select: { id: true, name: true, slug: true } },
+      images: { orderBy: { position: "asc" } },
+      relatedTo: { select: { relatedProductId: true } },
+      relatedFrom: { select: { productId: true } },
+      _count: { select: { reviews: true } },
+    },
   });
-
-  revalidatePath("/admin/products");
-  revalidatePath(`/products/${product.slug}`);
   return product;
 }
 
-export async function deleteProduct(id: string) {
-  await prisma.product.delete({ where: { id } });
-  revalidatePath("/admin/products");
+export async function searchProductsForOrder(query: string) {
+  if (!query.trim()) {
+    return prisma.product.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        name: true,
+        brand: true,
+        model: true,
+        price: true,
+        buyingPrice: true,
+        shippingCost: true,
+        handlerCost: true,
+        images: { orderBy: { position: "asc" }, take: 1 },
+      },
+      orderBy: { name: "asc" },
+      take: 20,
+    });
+  }
+
+  return prisma.product.findMany({
+    where: {
+      isActive: true,
+      OR: [
+        { name: { contains: query, mode: "insensitive" } },
+        { brand: { contains: query, mode: "insensitive" } },
+        { model: { contains: query, mode: "insensitive" } },
+        { sku: { contains: query, mode: "insensitive" } },
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      brand: true,
+      model: true,
+      price: true,
+      buyingPrice: true,
+      shippingCost: true,
+      handlerCost: true,
+      images: { orderBy: { position: "asc" }, take: 1 },
+    },
+    orderBy: { name: "asc" },
+    take: 20,
+  });
+}
+
+type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
+
+export async function createProduct(
+  input: ProductInput
+): Promise<ActionResult<{ id: string; name: string }>> {
+  const parsed = productSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues.map((e: any) => e.message).join(", ") };
+  }
+
+  const { images, relatedProductIds, ...productData } = parsed.data;
+
+  try {
+    const product = await prisma.product.create({
+      data: {
+        ...productData,
+        images: {
+          create: images.map((img) => ({
+            url: img.url,
+            alt: img.alt ?? null,
+            title: (img as any).title ?? null,
+            position: img.position,
+          })),
+        },
+        relatedTo: relatedProductIds.length > 0
+          ? {
+              create: relatedProductIds.map((relatedProductId) => ({
+                relatedProductId,
+              })),
+            }
+          : undefined,
+      },
+      select: { id: true, name: true },
+    });
+
+    revalidatePath("/admin/products");
+    revalidatePath("/products");
+    return { success: true, data: product };
+  } catch (e: unknown) {
+    const error = e as { code?: string; meta?: { target?: string[] } };
+    if (error.code === "P2002") {
+      const target = error.meta?.target?.join(", ") ?? "field";
+      return { success: false, error: `A product with this ${target} already exists.` };
+    }
+    // eslint-disable-next-line no-console
+    console.error("Create product error:", error);
+    return { success: false, error: `Failed to create product: ${(e as Error).message}` };
+  }
+}
+
+export async function updateProduct(
+  id: string,
+  input: Partial<ProductInput>
+): Promise<ActionResult<{ id: string; name: string }>> {
+  const parsed = productSchema.partial().safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues.map((e: any) => e.message).join(", ") };
+  }
+
+  const { images, relatedProductIds, ...productData } = parsed.data;
+
+  try {
+    const product = await prisma.$transaction(async (tx) => {
+      if (images !== undefined) {
+        await tx.productImage.deleteMany({ where: { productId: id } });
+        if (images.length > 0) {
+          await tx.productImage.createMany({
+            data: images.map((img) => ({
+              url: img.url,
+              alt: img.alt ?? null,
+              title: (img as any).title ?? null,
+              position: img.position,
+              productId: id,
+            })),
+          });
+        }
+      }
+
+      if (relatedProductIds !== undefined) {
+        await tx.relatedProduct.deleteMany({
+          where: {
+            OR: [{ productId: id }, { relatedProductId: id }],
+          },
+        });
+        if (relatedProductIds.length > 0) {
+          await tx.relatedProduct.createMany({
+            data: relatedProductIds.map((relatedProductId) => ({
+              productId: id,
+              relatedProductId,
+            })),
+          });
+        }
+      }
+
+      return tx.product.update({
+        where: { id },
+        data: productData,
+        select: { id: true, name: true, slug: true },
+      });
+    });
+
+    revalidatePath("/admin/products");
+    revalidatePath(`/admin/products/${id}`);
+    revalidatePath(`/products/${product.slug}`);
+    return { success: true, data: product };
+  } catch (e: unknown) {
+    const error = e as { code?: string; meta?: { target?: string[] } };
+    if (error.code === "P2002") {
+      const target = error.meta?.target?.join(", ") ?? "field";
+      return { success: false, error: `A product with this ${target} already exists.` };
+    }
+    if (error.code === "P2025") {
+      return { success: false, error: "Product not found." };
+    }
+    // eslint-disable-next-line no-console
+    console.error("Update product error:", error);
+    return { success: false, error: `Failed to update product: ${(e as Error).message}` };
+  }
+}
+
+export async function deleteProduct(id: string): Promise<ActionResult<{ id: string }>> {
+  try {
+    await prisma.product.delete({ where: { id } });
+    revalidatePath("/admin/products");
+    return { success: true, data: { id } };
+  } catch {
+    return { success: false, error: "Failed to delete product." };
+  }
 }

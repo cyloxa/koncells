@@ -49,7 +49,7 @@ export function PaymentForm({ clientSecret, onSuccess, onError }: PaymentFormPro
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="rounded-lg border border-gray-300 p-4 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-transparent transition-all">
+      <div className="rounded-lg border border-gray-300 p-4 focus-within:ring-2 focus-within:ring-brand focus-within:border-transparent transition-all">
         <CardElement options={cardElementOptions} />
       </div>
 

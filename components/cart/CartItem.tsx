@@ -45,7 +45,7 @@ export function CartItem({
       <div className="flex-1 min-w-0">
         <Link
           href={`/products/${slug}`}
-          className="text-sm font-medium text-gray-900 hover:text-indigo-600 line-clamp-2 transition-colors"
+          className="text-sm font-medium text-gray-900 hover:text-brand line-clamp-2 transition-colors"
         >
           {name}
         </Link>

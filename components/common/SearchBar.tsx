@@ -28,7 +28,7 @@ export function SearchBar() {
         placeholder="Search products..."
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        className="w-full pl-9 pr-4 py-2 text-sm bg-gray-100 border border-transparent rounded-lg focus:bg-white focus:border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all placeholder:text-gray-400"
+        className="w-full pl-9 pr-4 py-2 text-sm bg-gray-100 border border-transparent rounded-lg focus:bg-white focus:border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand/20 transition-all placeholder:text-gray-400"
       />
     </form>
   );

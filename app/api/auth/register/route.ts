@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, email, password } = parsed.data;
+    const { name, email, phone, location, socialLinks, additionalNotes, password } = parsed.data;
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
@@ -28,13 +28,27 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
-      data: { name, email, password: hashedPassword },
+      data: {
+        name,
+        email,
+        phone: phone || null,
+        location: location || null,
+        socialLinks: socialLinks || null,
+        additionalNotes: additionalNotes || null,
+        password: hashedPassword,
+      },
     });
 
     return NextResponse.json(
       {
         message: "Account created successfully",
-        user: { id: user.id, name: user.name, email: user.email },
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          location: user.location,
+        },
       },
       { status: 201 }
     );

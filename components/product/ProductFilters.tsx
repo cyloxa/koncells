@@ -55,7 +55,7 @@ export function ProductFilters({ categories, className }: ProductFiltersProps) {
         <SlidersHorizontal className="h-4 w-4" />
         Filters
         {hasActiveFilters && (
-          <span className="flex items-center justify-center h-5 w-5 rounded-full bg-indigo-600 text-white text-xs">
+          <span className="flex items-center justify-center h-5 w-5 rounded-full bg-brand text-white text-xs">
             !
           </span>
         )}
@@ -86,7 +86,7 @@ export function ProductFilters({ categories, className }: ProductFiltersProps) {
                 className={cn(
                   "block w-full text-left text-sm px-3 py-1.5 rounded-lg transition-colors",
                   !currentCategory
-                    ? "bg-indigo-50 text-indigo-700 font-medium"
+                    ? "bg-brand-light text-brand font-medium"
                     : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                 )}
               >
@@ -103,7 +103,7 @@ export function ProductFilters({ categories, className }: ProductFiltersProps) {
                   className={cn(
                     "block w-full text-left text-sm px-3 py-1.5 rounded-lg transition-colors",
                     currentCategory === cat.slug
-                      ? "bg-indigo-50 text-indigo-700 font-medium"
+                      ? "bg-brand-light text-brand font-medium"
                       : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                   )}
                 >
@@ -129,7 +129,7 @@ export function ProductFilters({ categories, className }: ProductFiltersProps) {
                 className={cn(
                   "block w-full text-left text-sm px-3 py-1.5 rounded-lg transition-colors",
                   currentSort === option.value
-                    ? "bg-indigo-50 text-indigo-700 font-medium"
+                    ? "bg-brand-light text-brand font-medium"
                     : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                 )}
               >

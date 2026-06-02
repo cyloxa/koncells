@@ -4,6 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { stripe } from "@/lib/stripe";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
+
+type ActionResult<T = void> =
+  | { success: true; data: T }
+  | { success: false; error: string };
 
 export async function createCheckoutSession(addressId: string) {
   const session = await auth();
@@ -152,5 +157,126 @@ export async function updateOrderStatus(id: string, status: string) {
 
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${id}`);
+  return order;
+}
+
+// ─── Manual Order Actions ──────────────────────────────
+
+const manualOrderItemSchema = z.object({
+  productId: z.string(),
+  productName: z.string(),
+  productBrand: z.string().optional().nullable(),
+  productModel: z.string().optional().nullable(),
+  quantity: z.number().int().min(1),
+  price: z.number().min(0),        // custom selling price per unit
+  costs: z.number().min(0),        // cost per unit
+  discount: z.number().min(0),     // discount per unit
+});
+
+const createManualOrderSchema = z.object({
+  customerId: z.string(),
+  items: z.array(manualOrderItemSchema).min(1),
+});
+
+export async function createManualOrder(
+  input: z.infer<typeof createManualOrderSchema>
+): Promise<ActionResult<{ id: string; orderNumber: number }>> {
+  const session = await auth();
+  if (session?.user?.role !== "ADMIN") {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  const parsed = createManualOrderSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues.map((e: any) => e.message).join(", "),
+    };
+  }
+
+  try {
+    const { customerId, items } = parsed.data;
+
+    // Calculate order totals
+    let subtotal = 0;
+    let totalCosts = 0;
+    let totalProfit = 0;
+
+    const orderItemsData = items.map((item) => {
+      const lineTotal = item.price * item.quantity;
+      const lineCosts = item.costs * item.quantity;
+      const lineProfit = (item.price - item.costs - item.discount) * item.quantity;
+
+      subtotal += lineTotal;
+      totalCosts += lineCosts;
+      totalProfit += lineProfit;
+
+      return {
+        quantity: item.quantity,
+        price: item.price,
+        costs: item.costs,
+        discount: item.discount,
+        profit: lineProfit,
+        productId: item.productId,
+      };
+    });
+
+    const total = subtotal; // manual orders don't add shipping/tax
+
+    const order = await prisma.order.create({
+      data: {
+        userId: customerId,
+        status: "PROCESSING",
+        subtotal,
+        shippingCost: 0,
+        tax: 0,
+        total,
+        totalCosts,
+        totalProfit,
+        isManualOrder: true,
+        items: {
+          create: orderItemsData,
+        },
+      },
+    });
+
+    revalidatePath("/admin/orders");
+    return { success: true, data: { id: order.id, orderNumber: order.orderNumber } };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "Failed to create order";
+    return { success: false, error: message };
+  }
+}
+
+export async function getAdminOrderById(id: string) {
+  const session = await auth();
+  if (session?.user?.role !== "ADMIN") throw new Error("Unauthorized");
+
+  const order = await prisma.order.findUnique({
+    where: { id },
+    include: {
+      user: {
+        select: { id: true, name: true, email: true, phone: true },
+      },
+      items: {
+        include: {
+          product: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              brand: true,
+              model: true,
+              images: { orderBy: { position: "asc" }, take: 1 },
+              buyingPrice: true,
+              shippingCost: true,
+              handlerCost: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
   return order;
 }

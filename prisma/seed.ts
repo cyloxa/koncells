@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { slugify } from "@/lib/utils";
 
 const prisma = new PrismaClient();
 
@@ -7,6 +8,7 @@ async function main() {
   console.log("🌱 Seeding database...");
 
   // ─── Clean existing data ────────────────────────────
+  await prisma.relatedProduct.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
   await prisma.cartItem.deleteMany();
@@ -26,6 +28,10 @@ async function main() {
     data: {
       name: "Admin User",
       email: "admin@example.com",
+      phone: "+1 (555) 000-0001",
+      location: "Colombo, Sri Lanka",
+      socialLinks: "WhatsApp: +15550000001\nLinkedIn: /in/admin-user",
+      additionalNotes: "Super admin account for store management.",
       password: adminPassword,
       role: "ADMIN",
     },
@@ -38,6 +44,10 @@ async function main() {
     data: {
       name: "John Doe",
       email: "john@example.com",
+      phone: "+1 (555) 123-4567",
+      location: "Kandy, Sri Lanka",
+      socialLinks: "Instagram: @johndoe\nFacebook: johndoe",
+      additionalNotes: "Prefers WhatsApp for communication.",
       password: userPassword,
       role: "USER",
     },
@@ -82,8 +92,17 @@ async function main() {
       slug: "wireless-noise-cancelling-headphones",
       description:
         "Premium over-ear headphones with active noise cancellation, 30-hour battery life, and ultra-comfortable memory foam ear cushions. Features Bluetooth 5.3 with multipoint connection and Hi-Res Audio support.",
+      brand: "Sony",
+      model: "WH-1000XM5",
+      tags: "wireless, noise-cancelling, bluetooth, premium",
+      weight: 0.25,
       price: 299.99,
       compareAtPrice: 349.99,
+      globalPrice: 299.99,
+      buyingPrice: 1800.00,
+      competitorsPrice: 85000.00,
+      shippingCost: 15.00,
+      handlerCost: 5.00,
       stock: 50,
       isFeatured: true,
       isActive: true,
@@ -99,8 +118,17 @@ async function main() {
       slug: "4k-ultra-hd-smart-monitor-27",
       description:
         "27-inch 4K UHD monitor with IPS panel, 99% sRGB, USB-C with 90W power delivery, built-in speakers, and adjustable ergonomic stand. Perfect for creative professionals.",
+      brand: "Dell",
+      model: "U2723QE",
+      tags: "4k, monitor, professional, usb-c",
+      weight: 6.5,
       price: 549.99,
       compareAtPrice: 649.99,
+      globalPrice: 549.99,
+      buyingPrice: 3300.00,
+      competitorsPrice: 155000.00,
+      shippingCost: 25.00,
+      handlerCost: 10.00,
       stock: 25,
       isFeatured: true,
       isActive: true,
@@ -116,8 +144,17 @@ async function main() {
       slug: "mechanical-gaming-keyboard-rgb",
       description:
         "Full-size mechanical keyboard with Cherry MX Blue switches, per-key RGB backlighting, aircraft-grade aluminum frame, and dedicated media controls.",
+      brand: "Logitech",
+      model: "G Pro X",
+      tags: "gaming, mechanical, rgb, keyboard",
+      weight: 1.1,
       price: 129.99,
       compareAtPrice: null,
+      globalPrice: 129.99,
+      buyingPrice: 780.00,
+      competitorsPrice: 35000.00,
+      shippingCost: 10.00,
+      handlerCost: 3.00,
       stock: 75,
       isFeatured: false,
       isActive: true,
@@ -132,8 +169,17 @@ async function main() {
       slug: "portable-bluetooth-speaker",
       description:
         "Compact, waterproof Bluetooth speaker with 360° sound, 20-hour battery, and built-in microphone. IP67 rated for outdoor adventures.",
+      brand: "JBL",
+      model: "Flip 6",
+      tags: "portable, bluetooth, speaker, waterproof",
+      weight: 0.55,
       price: 79.99,
       compareAtPrice: 99.99,
+      globalPrice: 79.99,
+      buyingPrice: 480.00,
+      competitorsPrice: 22000.00,
+      shippingCost: 8.00,
+      handlerCost: 3.00,
       stock: 120,
       isFeatured: false,
       isActive: true,
@@ -149,8 +195,17 @@ async function main() {
       slug: "classic-fit-cotton-oxford-shirt",
       description:
         "Timeless Oxford shirt crafted from 100% organic cotton with a button-down collar, chest pocket, and adjustable cuffs. Pre-washed for extra softness.",
+      brand: "Ralph Lauren",
+      model: "Classic Oxford",
+      tags: "cotton, formal, classic, oxford",
+      weight: 0.3,
       price: 69.99,
       compareAtPrice: null,
+      globalPrice: 69.99,
+      buyingPrice: 420.00,
+      competitorsPrice: 18500.00,
+      shippingCost: 5.00,
+      handlerCost: 2.00,
       stock: 200,
       isFeatured: true,
       isActive: true,
@@ -166,8 +221,17 @@ async function main() {
       slug: "slim-fit-stretch-chinos",
       description:
         "Modern slim-fit chinos in stretch cotton twill with a comfortable mid-rise waist. Features a hidden tech pocket and moisture-wicking finish.",
+      brand: "Dockers",
+      model: "Alpha Slim",
+      tags: "chinos, stretch, casual, slim-fit",
+      weight: 0.4,
       price: 89.99,
       compareAtPrice: 109.99,
+      globalPrice: 89.99,
+      buyingPrice: 540.00,
+      competitorsPrice: 24000.00,
+      shippingCost: 5.00,
+      handlerCost: 2.00,
       stock: 150,
       isFeatured: false,
       isActive: true,
@@ -182,8 +246,17 @@ async function main() {
       slug: "merino-wool-crew-neck-sweater",
       description:
         "Luxuriously soft 100% Merino wool sweater with ribbed cuffs, hem, and a classic crew neckline. Temperature-regulating and naturally odor-resistant.",
+      brand: "Uniqlo",
+      model: "Merino Crew",
+      tags: "wool, merino, sweater, crew-neck",
+      weight: 0.35,
       price: 119.99,
       compareAtPrice: 149.99,
+      globalPrice: 119.99,
+      buyingPrice: 720.00,
+      competitorsPrice: 32000.00,
+      shippingCost: 5.00,
+      handlerCost: 2.00,
       stock: 80,
       isFeatured: false,
       isActive: true,
@@ -199,8 +272,17 @@ async function main() {
       slug: "minimalist-ceramic-table-lamp",
       description:
         "Handcrafted ceramic table lamp with a matte white finish, linen shade, and warm LED bulb included. Features touch-activated dimming with three brightness levels.",
+      brand: "IKEA",
+      model: "Forsa",
+      tags: "lamp, ceramic, minimalist, table",
+      weight: 1.8,
       price: 149.99,
       compareAtPrice: null,
+      globalPrice: 149.99,
+      buyingPrice: 900.00,
+      competitorsPrice: 42000.00,
+      shippingCost: 12.00,
+      handlerCost: 5.00,
       stock: 40,
       isFeatured: true,
       isActive: true,
@@ -216,8 +298,17 @@ async function main() {
       slug: "organic-cotton-throw-blanket",
       description:
         "Ultra-soft organic cotton throw blanket in a herringbone weave. Measures 50\"x70\" — perfect for the sofa or end-of-bed layering. Machine washable.",
+      brand: "Barefoot Dreams",
+      model: "CozyChic Throw",
+      tags: "blanket, cotton, organic, throw",
+      weight: 0.9,
       price: 59.99,
       compareAtPrice: 79.99,
+      globalPrice: 59.99,
+      buyingPrice: 360.00,
+      competitorsPrice: 16000.00,
+      shippingCost: 8.00,
+      handlerCost: 3.00,
       stock: 100,
       isFeatured: false,
       isActive: true,
@@ -232,8 +323,17 @@ async function main() {
       slug: "scented-soy-candle-trio-set",
       description:
         "Set of three hand-poured soy wax candles in amber glass jars. Scents: Vanilla Bean, Cedar & Pine, and Fresh Linen. Each burns for 50+ hours.",
+      brand: "Yankee Candle",
+      model: "Signature Trio",
+      tags: "candle, scented, soy, gift-set",
+      weight: 1.2,
       price: 44.99,
       compareAtPrice: null,
+      globalPrice: 44.99,
+      buyingPrice: 270.00,
+      competitorsPrice: 12000.00,
+      shippingCost: 8.00,
+      handlerCost: 3.00,
       stock: 60,
       isFeatured: false,
       isActive: true,
@@ -262,6 +362,18 @@ async function main() {
     console.log(`✅ Product created: ${product.name}`);
   }
 
+  // Create related products for first few electronics
+  const allProductsForRelation = await prisma.product.findMany({ take: 4 });
+  if (allProductsForRelation.length >= 2) {
+    await prisma.relatedProduct.create({
+      data: {
+        productId: allProductsForRelation[0].id,
+        relatedProductId: allProductsForRelation[1].id,
+      },
+    });
+    console.log("✅ Related product link created");
+  }
+
   // ─── Create sample reviews ──────────────────────────
   const allProducts = await prisma.product.findMany({ take: 5 });
   const reviewData = [
@@ -282,6 +394,50 @@ async function main() {
     });
   }
   console.log("✅ Sample reviews created");
+
+  // ─── Brand Settings ────────────────────────────────
+  await prisma.brandSetting.deleteMany();
+  await prisma.brandSetting.create({
+    data: {
+      brandName: "Koncells",
+      phone: "+1 (555) 000-0000",
+      emails: "support@koncells.com\ninfo@koncells.com",
+      address: "123 Business Avenue\nColombo, Sri Lanka",
+    },
+  });
+  console.log("✅ Default brand settings created");
+
+  // ─── SEO Settings ──────────────────────────────────
+  await prisma.seoSettings.deleteMany();
+  await prisma.seoSettings.create({
+    data: { showInProductForm: true },
+  });
+  console.log("✅ Default SEO settings created (visible in product form)");
+
+  // ─── Exchange Rates ────────────────────────────────
+  await prisma.exchangeRate.deleteMany();
+  await prisma.exchangeRate.create({
+    data: { source: "CNY", target: "LKR", rate: 42.5000, isDefault: true },
+  });
+  await prisma.exchangeRate.create({
+    data: { source: "USD", target: "LKR", rate: 305.0000, isDefault: true },
+  });
+  console.log("✅ Default exchange rates created");
+
+  // ─── Brands ─────────────────────────────────────────
+  await prisma.brand.deleteMany();
+  const brandNames = [
+    "Sony", "Dell", "Logitech", "JBL",
+    "Ralph Lauren", "Dockers", "Uniqlo",
+    "IKEA", "Barefoot Dreams", "Yankee Candle",
+    "Apple", "Samsung", "LG", "Nike", "Adidas",
+  ];
+  for (const name of brandNames) {
+    await prisma.brand.create({
+      data: { name, slug: slugify(name) },
+    });
+  }
+  console.log(`✅ ${brandNames.length} brands created`);
 
   console.log("\n🎉 Seeding complete!");
   console.log("   Admin login: admin@example.com / admin123");
