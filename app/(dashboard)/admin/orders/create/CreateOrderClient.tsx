@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Plus, Trash2, ChevronRight, X, UserPlus, Package } from "lucide-react";
+import { Search, Plus, Trash2, ChevronRight, X, UserPlus, Package, Check } from "lucide-react";
 import { searchCustomers, createCustomer } from "@/actions/customer.actions";
 import { searchProductsForOrder } from "@/actions/product.actions";
 import { createManualOrder } from "@/actions/order.actions";
@@ -62,11 +62,12 @@ export default function CreateOrderPage() {
   });
   const [creating, setCreating] = useState(false);
 
-  // Product search
+  // Product search (multi-checkbox)
   const [productQuery, setProductQuery] = useState("");
   const [products, setProducts] = useState<ProductResult[]>([]);
   const [productLoading, setProductLoading] = useState(false);
   const [showProductDropdown, setShowProductDropdown] = useState(false);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const productRef = useRef<HTMLDivElement>(null);
 
   // Order items
@@ -80,7 +81,6 @@ export default function CreateOrderPage() {
     setCustomerLoading(true);
     try {
       const results = await searchCustomers(q);
-      // The server action returns User objects with _count; map to our interface
       const mapped = (results as any[]).map((r: any) => ({
         id: r.id,
         name: r.name,
@@ -164,7 +164,7 @@ export default function CreateOrderPage() {
     }
   };
 
-  // ─── Product search ───────────────────────────────────
+  // ─── Product search (multi-checkbox) ───────────────────
   const searchProductsFn = useCallback(async (q: string) => {
     setProductLoading(true);
     try {
@@ -186,33 +186,52 @@ export default function CreateOrderPage() {
     return () => clearTimeout(timer);
   }, [productQuery, searchProductsFn]);
 
-  const handleAddProduct = (product: ProductResult) => {
-    const defaultCost =
-      Number(product.buyingPrice ?? 0) +
-      Number(product.shippingCost ?? 0) +
-      Number(product.handlerCost ?? 0);
-    setOrderItems((prev) => {
-      const existing = prev.find((i) => i.productId === product.id);
-      if (existing) {
-        return prev.map((i) =>
-          i.productId === product.id ? { ...i, quantity: i.quantity + 1 } : i
-        );
+  const toggleProductSelection = (productId: string) => {
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) {
+        next.delete(productId);
+      } else {
+        next.add(productId);
       }
-      return [
-        ...prev,
-        {
-          productId: product.id,
-          productName: product.name,
-          productBrand: product.brand,
-          productModel: product.model,
+      return next;
+    });
+  };
+
+  const handleAddSelectedProducts = () => {
+    if (selectedProductIds.size === 0) {
+      toast.error("Please select at least one product");
+      return;
+    }
+
+    setOrderItems((prev) => {
+      const existing = new Set(prev.map((i) => i.productId));
+      const newItems: OrderItem[] = [];
+
+      for (const p of products) {
+        if (!selectedProductIds.has(p.id)) continue;
+        if (existing.has(p.id)) {
+          // Already in list — just increment quantity
+          continue;
+        }
+        const defaultCost = Number(p.buyingPrice ?? 0);
+        newItems.push({
+          productId: p.id,
+          productName: p.name,
+          productBrand: p.brand,
+          productModel: p.model,
           quantity: 1,
-          price: Number(product.price),
+          price: Number(p.price),
           costs: defaultCost,
           discount: 0,
-          imageUrl: product.images[0]?.url ?? null,
-        },
-      ];
+          imageUrl: p.images[0]?.url ?? null,
+        });
+      }
+
+      return [...prev, ...newItems];
     });
+
+    setSelectedProductIds(new Set());
     setProductQuery("");
     setShowProductDropdown(false);
   };
@@ -223,7 +242,7 @@ export default function CreateOrderPage() {
 
   const handleUpdateItem = (
     productId: string,
-    field: keyof Pick<OrderItem, "price" | "costs" | "discount" | "quantity">,
+    field: keyof Pick<OrderItem, "price" | "discount" | "quantity">,
     value: number
   ) => {
     setOrderItems((prev) =>
@@ -232,6 +251,8 @@ export default function CreateOrderPage() {
   };
 
   // ─── Calculations ─────────────────────────────────────
+  // Line total = selling price - discount (per unit, no quantity multiplication in display)
+  // Total costs = buyingPrice (from product page) — costs is the base price
   const orderTotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const totalCosts = orderItems.reduce((sum, i) => sum + i.costs * i.quantity, 0);
   const totalDiscount = orderItems.reduce((sum, i) => sum + i.discount * i.quantity, 0);
@@ -519,7 +540,7 @@ export default function CreateOrderPage() {
       {/* ─── Step 2: Products ─────────────────────────────── */}
       {step === "products" && (
         <div className="space-y-4">
-          {/* Product search */}
+          {/* Product search with multi-checkbox */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Add Products</h2>
             <div ref={productRef} className="relative">
@@ -527,7 +548,7 @@ export default function CreateOrderPage() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search products by name, brand, model or SKU..."
+                  placeholder="Search products by name, brand, model, SKU or description..."
                   value={productQuery}
                   onChange={(e) => {
                     setProductQuery(e.target.value);
@@ -546,41 +567,58 @@ export default function CreateOrderPage() {
 
               {showProductDropdown && products.length > 0 && (
                 <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
-                  {products.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => handleAddProduct(p)}
-                      className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 border-b border-gray-100 last:border-0"
-                    >
-                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                        {p.images[0] ? (
-                          <img
-                            src={p.images[0].url}
-                            alt=""
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Package className="h-4 w-4 text-gray-400" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">
-                          {p.name}
-                        </p>
-                        {p.brand && (
-                          <p className="text-xs text-gray-500 truncate">
-                            {p.brand}
-                            {p.model ? ` / ${p.model}` : ""}
+                  {products.map((p) => {
+                    const isSelected = selectedProductIds.has(p.id);
+                    return (
+                      <label
+                        key={p.id}
+                        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-0 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleProductSelection(p.id)}
+                          className="rounded border-gray-300 text-brand focus:ring-brand/40"
+                        />
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
+                          {p.images[0] ? (
+                            <img
+                              src={p.images[0].url}
+                              alt=""
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Package className="h-4 w-4 text-gray-400" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {p.name}
                           </p>
-                        )}
-                      </div>
-                      <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                        {fmt(Number(p.price))}
-                      </span>
+                          {p.brand && (
+                            <p className="text-xs text-gray-500 truncate">
+                              {p.brand}
+                              {p.model ? ` / ${p.model}` : ""}
+                            </p>
+                          )}
+                        </div>
+                        <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                          {fmt(Number(p.price))}
+                        </span>
+                      </label>
+                    );
+                  })}
+                  <div className="px-4 py-3 border-t border-gray-200 bg-gray-50">
+                    <button
+                      onClick={handleAddSelectedProducts}
+                      disabled={selectedProductIds.size === 0}
+                      className="w-full py-2 bg-brand text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 transition-colors"
+                    >
+                      Add Selected ({selectedProductIds.size})
                     </button>
-                  ))}
+                  </div>
                 </div>
               )}
 
@@ -605,10 +643,10 @@ export default function CreateOrderPage() {
             ) : (
               <div className="space-y-3">
                 {orderItems.map((item) => {
-                  const lineTotal = item.price * item.quantity;
+                  // Line total = selling price - discount (per unit)
+                  const lineTotal = item.price - item.discount;
+                  // Total costs (display only) = costs * quantity
                   const lineCosts = item.costs * item.quantity;
-                  const lineDiscount = item.discount * item.quantity;
-                  const lineProfit = lineTotal - lineCosts - lineDiscount;
                   return (
                     <div
                       key={item.productId}
@@ -674,21 +712,10 @@ export default function CreateOrderPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs text-gray-500 mb-1">Cost</label>
-                            <input
-                              type="number"
-                              min={0}
-                              step="any"
-                              value={item.costs}
-                              onChange={(e) =>
-                                handleUpdateItem(
-                                  item.productId,
-                                  "costs",
-                                  parseFloat(e.target.value) || 0
-                                )
-                              }
-                              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
-                            />
+                            <label className="block text-xs text-gray-500 mb-1">Cost (per unit)</label>
+                            <p className="w-full px-2 py-1.5 text-sm text-gray-700 bg-gray-100 rounded-md border border-gray-200">
+                              {fmt(item.costs)}
+                            </p>
                           </div>
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">
@@ -713,17 +740,10 @@ export default function CreateOrderPage() {
                         <div className="flex items-center justify-between mt-2">
                           <div className="flex gap-4 text-xs text-gray-600">
                             <span>
-                              Line total: <strong>{fmt(lineTotal)}</strong>
+                              Line total: <strong>{fmt(lineTotal)}</strong> (selling price - discount)
                             </span>
                             <span>
-                              Profit:{" "}
-                              <strong
-                                className={
-                                  lineProfit >= 0 ? "text-green-600" : "text-red-600"
-                                }
-                              >
-                                {fmt(lineProfit)}
-                              </strong>
+                              Total costs: <strong>{fmt(lineCosts)}</strong>
                             </span>
                           </div>
                           <button

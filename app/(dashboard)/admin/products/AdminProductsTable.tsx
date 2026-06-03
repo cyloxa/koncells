@@ -96,13 +96,16 @@ export default function AdminProductsTable({ initialProducts, usdToLkr, cnyToLkr
       const res = await fetch(`/api/admin/products?ids=${ids.join(",")}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to delete products");
+      }
       toast.success(`${ids.length} product(s) deleted`);
       setSelectedIds(new Set());
       setProducts((prev) => prev.filter((p) => !ids.includes(p.id)));
       router.refresh();
-    } catch {
-      toast.error("Failed to delete products");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete products");
     } finally {
       setIsBulkDeleting(false);
     }
@@ -275,7 +278,7 @@ export default function AdminProductsTable({ initialProducts, usdToLkr, cnyToLkr
                 </th>
                 <th className="text-left py-3 px-3 font-medium text-gray-600">Product</th>
                 <th className="text-right py-3 px-3 font-medium text-gray-600">Selling Price</th>
-                <th className="text-right py-3 px-3 font-medium text-gray-600">CNY Price</th>
+                <th className="text-right py-3 px-3 font-medium text-gray-600">Buying Price</th>
                 <th className="text-right py-3 px-3 font-medium text-gray-600">Global Price</th>
                 <th className="text-right py-3 px-3 font-medium text-gray-600">Competitor</th>
                 <th className="text-right py-3 px-3 font-medium text-gray-600">Profit</th>

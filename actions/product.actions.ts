@@ -147,6 +147,7 @@ export async function searchProductsForOrder(query: string) {
             { brand: { contains: query, mode: "insensitive" } },
             { model: { contains: query, mode: "insensitive" } },
             { sku: { contains: query, mode: "insensitive" } },
+            { description: { contains: query, mode: "insensitive" } },
           ],
         },
         select,
@@ -290,7 +291,10 @@ export async function updateProduct(
 
 export async function deleteProduct(id: string): Promise<ActionResult<{ id: string }>> {
   try {
-    await prisma.product.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.cartItem.deleteMany({ where: { productId: id } });
+      await tx.product.delete({ where: { id } });
+    });
     revalidatePath("/admin/products");
     return { success: true, data: { id } };
   } catch {

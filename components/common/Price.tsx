@@ -19,11 +19,11 @@ export function Price({ price, compareAtPrice, className, size = "md" }: PricePr
   return (
     <div className={cn("flex items-baseline gap-2", className)}>
       <span className={cn("font-bold text-gray-900", sizeClasses[size])}>
-        {formatPrice(price)}
+        {formatPrice(price, { currency: "LKR" })}
       </span>
       {hasDiscount && (
         <span className="text-sm text-gray-500 line-through">
-          {formatPrice(compareAtPrice)}
+          {formatPrice(compareAtPrice, { currency: "LKR" })}
         </span>
       )}
     </div>

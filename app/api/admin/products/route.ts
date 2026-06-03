@@ -13,24 +13,42 @@ export async function DELETE(request: NextRequest) {
   const id = searchParams.get("id");
   const idsParam = searchParams.get("ids");
 
+  let ids: string[];
+
   // Bulk delete
   if (idsParam) {
-    const ids = idsParam.split(",").filter(Boolean);
+    ids = idsParam.split(",").filter(Boolean);
     if (ids.length === 0) {
       return NextResponse.json({ error: "No IDs provided" }, { status: 400 });
     }
-    await prisma.product.deleteMany({ where: { id: { in: ids } } });
-    return NextResponse.json({ success: true, count: ids.length });
-  }
-
-  // Single delete
-  if (!id) {
+  } else if (id) {
+    ids = [id];
+  } else {
     return NextResponse.json({ error: "Product ID is required" }, { status: 400 });
   }
 
-  await prisma.product.delete({ where: { id } });
+  try {
+    // Delete related records that do NOT cascade from Product:
+    // - CartItem (no onDelete: Cascade)
+    // - OrderItem (no onDelete: Cascade — but we keep order history intact; skip it)
+    // ProductImage and Review have onDelete: Cascade so they'll be handled automatically
+    await prisma.$transaction(async (tx) => {
+      await tx.cartItem.deleteMany({ where: { productId: { in: ids } } });
+      await tx.product.deleteMany({ where: { id: { in: ids } } });
+    });
 
-  return NextResponse.json({ success: true });
+    if (ids.length === 1) {
+      return NextResponse.json({ success: true });
+    }
+    return NextResponse.json({ success: true, count: ids.length });
+  } catch (error) {
+    const prismaError = error as { code?: string; message?: string };
+    console.error("Delete products error:", prismaError.message || prismaError);
+    return NextResponse.json(
+      { error: "Failed to delete products. They may be linked to existing orders." },
+      { status: 500 }
+    );
+  }
 }
 
 // PATCH — inline edit a product field

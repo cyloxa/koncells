@@ -1,0 +1,9 @@
+.next/
+node_modules/
+next-env.d.ts
+*.tsbuildinfo
+graphify-out/
+backups/
+.env
+package-lock.json
+.git/

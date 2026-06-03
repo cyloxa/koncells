@@ -126,13 +126,21 @@ export function ProductForm({
   const [price, setPrice] = useState(initialData?.price?.toString() ?? "");
 
   // USD price section: enter USD → auto-calc LKR using default USD rate
-  const [usdAmount, setUsdAmount] = useState("");
+  const [usdAmount, setUsdAmount] = useState(
+    isEdit && initialData?.globalPrice && defaultRates.usdToLkr
+      ? (Number(initialData.globalPrice) / defaultRates.usdToLkr).toFixed(2)
+      : ""
+  );
   const [globalPrice, setGlobalPrice] = useState(
     initialData?.globalPrice?.toString() ?? ""
   );
 
   // Buying price section: enter CNY → auto-calc LKR using default CNY rate
-  const [cnyAmount, setCnyAmount] = useState("");
+  const [cnyAmount, setCnyAmount] = useState(
+    isEdit && initialData?.buyingPrice && defaultRates.cnyToLkr
+      ? (Number(initialData.buyingPrice) / defaultRates.cnyToLkr).toFixed(2)
+      : ""
+  );
   const [buyingPrice, setBuyingPrice] = useState(
     initialData?.buyingPrice?.toString() ?? ""
   );
@@ -441,6 +449,20 @@ export function ProductForm({
     document.addEventListener("paste", handlePaste);
     return () => document.removeEventListener("paste", handlePaste);
   }, [addImagesFromFiles]);
+
+  // ─── Ctrl+S / Cmd+S save shortcut ────────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        // Trigger form submit programmatically
+        const form = document.querySelector("form");
+        form?.requestSubmit();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Remove image by key
   const removeImage = (key: number) => {
