@@ -218,7 +218,7 @@ export default function AdminOrdersTable({ initialOrders }: AdminOrdersTableProp
               {orders.length === 0 && (
                 <tr>
                   <td colSpan={9} className="py-12 text-center text-gray-500">
-                    No orders yet.
+                    No orders yet. Create your first order to get started.
                   </td>
                 </tr>
               )}

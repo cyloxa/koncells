@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
   Copy,
@@ -127,13 +128,13 @@ export function OrderDetailClient({ order }: Props) {
   const [hoveredItem, setHoveredItem] = useState<OrderItemData | null>(null);
   const [popupPos, setPopupPos] = useState({ top: 0, left: 0 });
 
-  const fmt = (val: number) =>
-    new Intl.NumberFormat("en-LK", {
+  const fmtCurrency = (n: number) =>
+    n.toLocaleString("en-US", {
       style: "currency",
       currency: "LKR",
       minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    }).format(val);
+      maximumFractionDigits: 0,
+    });
 
   // ─── Derived totals ─────────────────────────────────
   const orderTotal = items.reduce((sum, i) => sum + Number(i.price) * i.quantity, 0);
@@ -395,13 +396,13 @@ export function OrderDetailClient({ order }: Props) {
           : item.product.name;
         if (lineDiscount > 0) {
           text += `${idx + 1}. ${name} × ${item.quantity}  →  ${
-            fmt(lineTotal)
-          } - Discount ${fmt(lineDiscount)}  =  ${fmt(finalPrice)}\n`;
+            fmtCurrency(lineTotal)
+          } - Discount ${fmtCurrency(lineDiscount)}  =  ${fmtCurrency(finalPrice)}\n`;
         } else {
-          text += `${idx + 1}. ${name} × ${item.quantity}  →  ${fmt(finalPrice)}\n`;
+          text += `${idx + 1}. ${name} × ${item.quantity}  →  ${fmtCurrency(finalPrice)}\n`;
         }
       });
-      text += `\nTotal Price: ${fmt(orderTotal)}`;
+      text += `\nTotal Price: ${fmtCurrency(orderTotal)}`;
       await navigator.clipboard.writeText(text);
       toast.success("Copied to clipboard");
     } catch {
@@ -419,7 +420,7 @@ export function OrderDetailClient({ order }: Props) {
     }
     const phone = order.user.phone.replace(/\D/g, "");
     const message = encodeURIComponent(
-      `Order #${order.orderNumber}\nTotal: ${fmt(orderTotal)}`
+      `Order #${order.orderNumber}\nTotal: ${fmtCurrency(orderTotal)}`
     );
     window.open(`https://wa.me/${phone}?text=${message}`, "_blank");
   };
@@ -519,7 +520,7 @@ export function OrderDetailClient({ order }: Props) {
           <select
             value={status}
             onChange={(e) => handleStatusChange(e.target.value)}
-            className={`text-sm rounded-lg border border-gray-300 px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand/40 ${
+            className={`text-sm rounded-lg border border-gray-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/40 ${
               statusColors[status] ?? "bg-gray-100 text-gray-700"
             }`}
           >
@@ -558,21 +559,21 @@ export function OrderDetailClient({ order }: Props) {
 
             {/* Actions */}
             <div className="flex items-start gap-2 pt-6">
-              <button
+              <Button
                 onClick={handleCopyToWhatsApp}
                 disabled={copying}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                className="bg-green-600 text-white hover:bg-green-700 text-xs"
               >
                 <Copy className="h-3.5 w-3.5" />
                 {copying ? "Copying..." : "Copy to WhatsApp"}
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={handleOpenWhatsApp}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-green-500 text-white text-xs font-medium rounded-lg hover:bg-green-600 transition-colors"
+                className="bg-green-500 text-white hover:bg-green-600 text-xs"
               >
                 <MessageCircle className="h-3.5 w-3.5" />
                 Open WhatsApp
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -582,12 +583,12 @@ export function OrderDetailClient({ order }: Props) {
           <div className="flex items-center gap-8">
             <div>
               <span className="text-xs text-gray-500">Order Total</span>
-              <p className="text-lg font-bold text-gray-900">{fmt(orderTotal)}</p>
+              <p className="text-lg font-bold text-gray-900">{fmtCurrency(orderTotal)}</p>
             </div>
             <div className="w-px h-10 bg-gray-200" />
             <div>
               <span className="text-xs text-gray-500">Total Costs</span>
-              <p className="text-lg font-bold text-gray-900">{fmt(totalCosts)}</p>
+              <p className="text-lg font-bold text-gray-900">{fmtCurrency(totalCosts)}</p>
             </div>
             <div className="w-px h-10 bg-gray-200" />
             <div>
@@ -597,7 +598,7 @@ export function OrderDetailClient({ order }: Props) {
                   totalProfit >= 0 ? "text-green-600" : "text-red-600"
                 }`}
               >
-                {fmt(totalProfit)}
+                {fmtCurrency(totalProfit)}
               </p>
             </div>
             <div className="w-px h-10 bg-gray-200" />
@@ -616,23 +617,24 @@ export function OrderDetailClient({ order }: Props) {
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
             <div className="flex items-center gap-2">
               {selectedIds.size > 0 && (
-                <button
+                <Button
+                  variant="destructive"
+                  size="sm"
                   onClick={handleBulkDelete}
                   disabled={deleting}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white text-xs font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   {deleting ? "Deleting..." : `Delete (${selectedIds.size})`}
-                </button>
+                </Button>
               )}
             </div>
-            <button
+            <Button
               onClick={() => setShowAddProducts(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand text-white text-xs font-medium rounded-lg hover:opacity-90 transition-colors"
+              size="sm"
             >
               <Plus className="h-3.5 w-3.5" />
               Add Products
-            </button>
+            </Button>
           </div>
 
           <div className="overflow-x-auto">
@@ -644,7 +646,7 @@ export function OrderDetailClient({ order }: Props) {
                       type="checkbox"
                       checked={selectedIds.size === items.length && items.length > 0}
                       onChange={toggleSelectAll}
-                      className="rounded border-gray-300 text-brand focus:ring-brand/40"
+                      className="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand"
                     />
                   </th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider">
@@ -701,7 +703,7 @@ export function OrderDetailClient({ order }: Props) {
                           type="checkbox"
                           checked={selectedIds.has(item.id)}
                           onChange={() => toggleSelect(item.id)}
-                          className="rounded border-gray-300 text-brand focus:ring-brand/40"
+                          className="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand"
                         />
                       </td>
 
@@ -755,7 +757,7 @@ export function OrderDetailClient({ order }: Props) {
                       {/* Competitor Price */}
                       <td className="px-3 py-3 text-right text-gray-900">
                         {v.competitorsPrice != null
-                          ? fmt(Number(v.competitorsPrice))
+                          ? fmtCurrency(Number(v.competitorsPrice))
                           : "—"}
                       </td>
 
@@ -776,22 +778,22 @@ export function OrderDetailClient({ order }: Props) {
 
                       {/* Base Price */}
                       <td className="px-3 py-3 text-right text-gray-900">
-                        {fmt(v.basePrice)}
+                        {fmtCurrency(v.basePrice)}
                       </td>
 
                       {/* Shipping Cost (LKR) — from product × qty */}
                       <td className="px-3 py-3 text-right text-gray-900">
-                        {fmt(v.shippingCost * item.quantity)}
+                        {fmtCurrency(v.shippingCost * item.quantity)}
                       </td>
 
                       {/* Handler Cost (LKR) — from product × qty */}
                       <td className="px-3 py-3 text-right text-gray-900">
-                        {fmt(v.handlerCost * item.quantity)}
+                        {fmtCurrency(v.handlerCost * item.quantity)}
                       </td>
 
                       {/* Total Costs (base + shipping + handler) * qty */}
                       <td className="px-3 py-3 text-right text-gray-900">
-                        {fmt(v.totalCosts)}
+                        {fmtCurrency(v.totalCosts)}
                       </td>
 
                       {/* Discount — inline editable */}
@@ -815,13 +817,13 @@ export function OrderDetailClient({ order }: Props) {
                             v.lineProfit >= 0 ? "text-green-600" : "text-red-600"
                           }`}
                         >
-                          {fmt(v.lineProfit)}
+                          {fmtCurrency(v.lineProfit)}
                         </span>
                       </td>
 
                       {/* Line Total = (selling price - discount) × qty */}
                       <td className="px-3 py-3 text-right font-medium text-gray-900">
-                        {fmt(v.lineTotal)}
+                        {fmtCurrency(v.lineTotal)}
                       </td>
                     </tr>
                   );
@@ -940,7 +942,7 @@ export function OrderDetailClient({ order }: Props) {
                           )}
                         </div>
                         <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                          {fmt(Number(p.price))}
+                          {fmtCurrency(Number(p.price))}
                         </span>
                       </button>
                     ))}
@@ -952,7 +954,10 @@ export function OrderDetailClient({ order }: Props) {
                   !productLoading &&
                   productQuery.trim() && (
                     <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-center">
-                      <p className="text-sm text-gray-500">No products found</p>
+                      <div className="text-center">
+                        <p className="text-sm text-gray-500">No products match your search.</p>
+                        <p className="text-xs text-gray-400 mt-1">Try a different search term.</p>
+                      </div>
                     </div>
                   )}
               </div>
@@ -971,26 +976,25 @@ export function OrderDetailClient({ order }: Props) {
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40 resize-y"
           />
           <div className="flex justify-end mt-3">
-            <button
+            <Button
               onClick={handleSaveNotes}
               disabled={savingNotes}
-              className="px-4 py-2 bg-brand text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 transition-colors"
             >
               {savingNotes ? "Saving..." : "Save Notes"}
-            </button>
+            </Button>
           </div>
         </div>
 
         {/* ─── Save Order Button ───────────────────────── */}
         <div className="flex justify-end">
-          <button
+          <Button
             onClick={handleSaveOrder}
             disabled={savingOrder}
-            className="inline-flex items-center gap-2 px-8 py-3 bg-brand text-white text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-50 transition-colors shadow-sm"
+            size="lg"
           >
             <Save className="h-4 w-4" />
             {savingOrder ? "Saving Order..." : "Save Order"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

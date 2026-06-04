@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import { Search, Plus, Trash2, ChevronRight, X, UserPlus, Package, Check } from "lucide-react";
 import { searchCustomers, createCustomer } from "@/actions/customer.actions";
 import { searchProductsForOrder } from "@/actions/product.actions";
@@ -297,13 +298,13 @@ export default function CreateOrderPage() {
     }
   };
 
-  const fmt = (val: number) =>
-    new Intl.NumberFormat("en-LK", {
+  const fmtCurrency = (n: number) =>
+    n.toLocaleString("en-US", {
       style: "currency",
       currency: "LKR",
       minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    }).format(val);
+      maximumFractionDigits: 0,
+    });
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -439,16 +440,17 @@ export default function CreateOrderPage() {
 
           {!showNewCustomer && (
             <div className="text-center">
-              <button
+              <Button
                 onClick={() => {
                   setShowNewCustomer(true);
                   setShowCustomerDropdown(false);
                 }}
-                className="inline-flex items-center gap-2 text-sm text-brand hover:text-brand/80 font-medium"
+                variant="link"
+                size="sm"
               >
                 <UserPlus className="h-4 w-4" />
                 Create new customer
-              </button>
+              </Button>
             </div>
           )}
 
@@ -505,22 +507,21 @@ export default function CreateOrderPage() {
                 />
               </div>
               <div className="flex gap-2 justify-end">
-                <button
+                <Button
+                  variant="outline"
                   onClick={() => {
                     setShowNewCustomer(false);
                     setNewCustomer({ name: "", email: "", phone: "", location: "" });
                   }}
-                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={handleCreateCustomer}
                   disabled={creating}
-                  className="px-4 py-2 text-sm bg-brand text-white rounded-lg hover:opacity-90 disabled:opacity-50"
                 >
                   {creating ? "Creating..." : "Create & Select"}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -578,7 +579,7 @@ export default function CreateOrderPage() {
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleProductSelection(p.id)}
-                          className="rounded border-gray-300 text-brand focus:ring-brand/40"
+                          className="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand"
                         />
                         <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
                           {p.images[0] ? (
@@ -605,26 +606,29 @@ export default function CreateOrderPage() {
                           )}
                         </div>
                         <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                          {fmt(Number(p.price))}
+                          {fmtCurrency(Number(p.price))}
                         </span>
                       </label>
                     );
                   })}
                   <div className="px-4 py-3 border-t border-gray-200 bg-gray-50">
-                    <button
+                    <Button
                       onClick={handleAddSelectedProducts}
                       disabled={selectedProductIds.size === 0}
-                      className="w-full py-2 bg-brand text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 transition-colors"
+                      className="w-full"
                     >
                       Add Selected ({selectedProductIds.size})
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
 
               {showProductDropdown && products.length === 0 && !productLoading && productQuery.trim() && (
                 <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-center">
-                  <p className="text-sm text-gray-500">No products found</p>
+                  <div className="text-center">
+                    <p className="text-sm text-gray-500">No products match your search.</p>
+                    <p className="text-xs text-gray-400 mt-1">Try a different search term.</p>
+                  </div>
                 </div>
               )}
             </div>
@@ -714,7 +718,7 @@ export default function CreateOrderPage() {
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">Cost (per unit)</label>
                             <p className="w-full px-2 py-1.5 text-sm text-gray-700 bg-gray-100 rounded-md border border-gray-200">
-                              {fmt(item.costs)}
+                              {fmtCurrency(item.costs)}
                             </p>
                           </div>
                           <div>
@@ -740,10 +744,10 @@ export default function CreateOrderPage() {
                         <div className="flex items-center justify-between mt-2">
                           <div className="flex gap-4 text-xs text-gray-600">
                             <span>
-                              Line total: <strong>{fmt(lineTotal)}</strong> (selling price - discount)
+                              Line total: <strong>{fmtCurrency(lineTotal)}</strong> (selling price - discount)
                             </span>
                             <span>
-                              Total costs: <strong>{fmt(lineCosts)}</strong>
+                              Total costs: <strong>{fmtCurrency(lineCosts)}</strong>
                             </span>
                           </div>
                           <button
@@ -828,10 +832,10 @@ export default function CreateOrderPage() {
                       </p>
                     </div>
                     <div className="text-right text-sm">
-                      <p className="font-medium text-gray-900">{fmt(finalPrice)}</p>
+                      <p className="font-medium text-gray-900">{fmtCurrency(finalPrice)}</p>
                       {item.discount > 0 && (
                         <p className="text-xs text-green-600">
-                          -{fmt(lineDiscount)} discount
+                          -{fmtCurrency(lineDiscount)} discount
                         </p>
                       )}
                     </div>
@@ -846,15 +850,15 @@ export default function CreateOrderPage() {
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Order Total</span>
-                <span className="font-medium text-gray-900">{fmt(orderTotal)}</span>
+                <span className="font-medium text-gray-900">{fmtCurrency(orderTotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Total Costs</span>
-                <span className="font-medium text-gray-900">{fmt(totalCosts)}</span>
+                <span className="font-medium text-gray-900">{fmtCurrency(totalCosts)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Total Discount</span>
-                <span className="font-medium text-red-600">-{fmt(totalDiscount)}</span>
+                <span className="font-medium text-red-600">-{fmtCurrency(totalDiscount)}</span>
               </div>
               <div className="pt-2 border-t border-gray-200 flex justify-between">
                 <span className="font-semibold text-gray-900">Total Profit</span>
@@ -863,7 +867,7 @@ export default function CreateOrderPage() {
                     totalProfit >= 0 ? "text-green-600" : "text-red-600"
                   }`}
                 >
-                  {fmt(totalProfit)}
+                  {fmtCurrency(totalProfit)}
                 </span>
               </div>
             </div>

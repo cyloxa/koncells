@@ -95,5 +95,9 @@ export default async function AdminOrdersPage() {
     };
   });
 
-  return <AdminOrdersTable initialOrders={rows} />;
+  return (
+    <div className="p-6">
+      <AdminOrdersTable initialOrders={rows} />
+    </div>
+  );
 }
