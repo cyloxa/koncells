@@ -13,8 +13,11 @@ import {
   X,
   Loader2,
   Check,
+  Download,
+  Upload,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { exportProductsCsv, importProductsCsv } from "@/actions/product.actions";
 
 export interface ProductRow {
   id: string;
@@ -54,6 +57,19 @@ export default function AdminProductsTable({ initialProducts, usdToLkr, cnyToLkr
   const [editingCell, setEditingCell] = useState<{ id: string; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [lightboxProduct, setLightboxProduct] = useState<{ name: string; images: { url: string; alt: string | null }[] } | null>(null);
+
+  // Import/Export state
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [downloadImages, setDownloadImages] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    created: number;
+    updated: number;
+    skipped: number;
+    errors: string[];
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filtered = search.trim()
     ? products.filter(
@@ -182,6 +198,66 @@ export default function AdminProductsTable({ initialProducts, usdToLkr, cnyToLkr
     }
   }, [products]);
 
+  // ─── CSV Export ─────────────────────────────────────
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      const result = await exportProductsCsv();
+      if (result.success) {
+        const blob = new Blob([result.data], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", `products-export-${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast.success("Products exported");
+      } else {
+        toast.error(result.error);
+      }
+    } catch {
+      toast.error("Failed to export products");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // ─── CSV Import ─────────────────────────────────────
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    setImportResult(null);
+
+    try {
+      const text = await file.text();
+      const result = await importProductsCsv(text, downloadImages);
+      if (result.success) {
+        setImportResult(result.data);
+        if (result.data.created > 0 || result.data.updated > 0) {
+          const total = result.data.created + result.data.updated;
+          toast.success(`Imported ${total} product(s) (${result.data.created} new, ${result.data.updated} updated)`);
+          router.refresh();
+        }
+        if (result.data.skipped > 0) {
+          toast.error(`${result.data.skipped} product(s) skipped`);
+        }
+      } else {
+        toast.error(result.error);
+      }
+    } catch {
+      toast.error("Failed to read CSV file");
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
   const profit = (p: ProductRow) => {
     const selling = p.price || 0;
     const cost = p.buyingPrice ? Number(p.buyingPrice) : 0;
@@ -244,22 +320,36 @@ export default function AdminProductsTable({ initialProducts, usdToLkr, cnyToLkr
             </button>
           )}
         </div>
-        {selectedIds.size > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleBulkDelete}
-            disabled={isBulkDeleting}
-            className="text-red-600 border-red-200 hover:bg-red-50"
-          >
-            {isBulkDeleting ? (
-              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+        <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleBulkDelete}
+              disabled={isBulkDeleting}
+              className="text-red-600 border-red-200 hover:bg-red-50"
+            >
+              {isBulkDeleting ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-1" />
+              )}
+              Delete ({selectedIds.size})
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={isExporting}>
+            {isExporting ? (
+              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
             ) : (
-              <Trash2 className="h-4 w-4 mr-1" />
+              <Download className="h-4 w-4 mr-1.5" />
             )}
-            Delete ({selectedIds.size})
+            Export CSV
           </Button>
-        )}
+          <Button variant="outline" size="sm" onClick={() => setIsImportModalOpen(true)}>
+            <Upload className="h-4 w-4 mr-1.5" />
+            Import CSV
+          </Button>
+        </div>
       </div>
 
       {/* Table */}
@@ -453,6 +543,157 @@ export default function AdminProductsTable({ initialProducts, usdToLkr, cnyToLkr
         </div>
       </div>
     </div>
+
+      {/* ─── Import CSV Modal ───────────────────────────── */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setIsImportModalOpen(false)} />
+          <div className="relative bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-2xl mx-4 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Import Products from CSV</h2>
+              <button
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportResult(null);
+                }}
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-600 space-y-2">
+                <p className="font-medium text-gray-800">CSV format:</p>
+                <code className="block text-xs font-mono bg-white p-2 rounded border border-gray-200 whitespace-pre-wrap break-all">
+                  name,slug,sku,categorySlug,description,price,buyingPrice,globalPrice,stock,brand,model,condition,weight,compareAtPrice,shippingCost,handlerCost,competitorsPrice,isActive,showPrice,isFeatured,tags,metaTitle,metaDescription,focusKeyphrase,image1,image2,image3,image4,image5
+                </code>
+                <p className="text-xs text-gray-500">
+                  The first row must be the header. Products with existing SKUs will be updated.
+                  Category slugs must match existing categories (new categories will be auto-created).
+                  Up to 5 image URLs can be specified. Optional fields can be left empty.
+                </p>
+              </div>
+
+              <label className="flex items-center gap-3 text-sm cursor-pointer">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={downloadImages}
+                    onChange={(e) => setDownloadImages(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand"
+                  />
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Download images from URLs</span>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    If enabled, images will be downloaded, watermarked, and stored locally.
+                    If disabled, image URLs will be linked directly.
+                  </p>
+                </div>
+              </label>
+
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                {isImporting ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-8 w-8 animate-spin text-brand" />
+                    <p className="text-sm text-gray-600">Importing products...</p>
+                    {downloadImages && (
+                      <p className="text-xs text-gray-400">Downloading and watermarking images...</p>
+                    )}
+                  </div>
+                ) : importResult ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-800">Import complete</p>
+                    <div className="flex gap-4 justify-center text-sm">
+                      <span>
+                        Created: <span className="font-medium text-green-600">{importResult.created}</span>
+                      </span>
+                      <span>
+                        Updated: <span className="font-medium text-blue-600">{importResult.updated}</span>
+                      </span>
+                      <span>
+                        Skipped: <span className="font-medium text-amber-600">{importResult.skipped}</span>
+                      </span>
+                    </div>
+                    {importResult.errors.length > 0 && (
+                      <details className="text-left mt-2">
+                        <summary className="text-xs text-red-600 cursor-pointer font-medium">
+                          {importResult.errors.length} error{importResult.errors.length !== 1 ? "s" : ""}
+                        </summary>
+                        <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
+                          {importResult.errors.map((err, idx) => (
+                            <li key={idx} className="text-xs text-red-500 font-mono">
+                              {err}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setImportResult(null);
+                        setIsImportModalOpen(false);
+                      }}
+                      className="mt-2"
+                    >
+                      Close
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="h-10 w-10 text-gray-400 mx-auto mb-3" />
+                    <p className="text-sm text-gray-600 mb-1">
+                      Click to upload or drag a CSV file here
+                    </p>
+                    <p className="text-xs text-gray-400">.csv files only</p>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="mt-3"
+                    >
+                      Select CSV File
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const sample =
+                      "name,slug,sku,categorySlug,description,price,buyingPrice,globalPrice,stock,brand,model,condition,weight,compareAtPrice,shippingCost,handlerCost,competitorsPrice,isActive,showPrice,isFeatured,tags,metaTitle,metaDescription,focusKeyphrase,image1,image2,image3,image4,image5\nSample Product,sample-product,SKU001,electronics,This is a sample product description,1000,500,800,10,BrandX,ModelA,New,1.5,,50,25,,true,true,false,electronics,tag1,tag2,Sample Meta Title,Sample meta description for SEO,sample keyword,https://example.com/image1.jpg,,,,,\n";
+                    const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.setAttribute("download", "products-sample.csv");
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  <Download className="h-4 w-4 mr-1.5" />
+                  Download Sample
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── Lightbox ──────────────────────────────────── */}
       {lightboxProduct && (
