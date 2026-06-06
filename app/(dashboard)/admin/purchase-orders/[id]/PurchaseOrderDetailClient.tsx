@@ -11,8 +11,6 @@ import {
   Trash2,
   Save,
   X,
-  Pencil,
-  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -64,11 +62,10 @@ interface Shipment {
   shipmentNumber: number;
   status: string;
   totalWeight: number | null;
-  baseShippingCost: number | null;
+  shippingRatePerKg: number | null;
   extraCost: number | null;
   totalShippingCost: number | null;
   notes: string | null;
-  packedAt: Date | null;
   shippedAt: Date | null;
   deliveredAt: Date | null;
   createdAt: Date;
@@ -78,14 +75,10 @@ interface PurchaseOrder {
   id: string;
   poNumber: number;
   supplierName: string | null;
-  supplierContact: string | null;
-  status: string;
   totalCny: number;
   exchangeRate: number;
   totalLkr: number;
   notes: string | null;
-  orderedAt: Date | null;
-  receivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   items: POItem[];
@@ -96,28 +89,18 @@ interface PurchaseOrderDetailClientProps {
   purchaseOrder: PurchaseOrder;
 }
 
-const poStatusColors: Record<string, string> = {
-  PENDING: "bg-yellow-100 text-yellow-800",
-  ORDERED: "bg-blue-100 text-blue-800",
-  SHIPPED: "bg-purple-100 text-purple-800",
-  PARTIAL: "bg-orange-100 text-orange-800",
-  RECEIVED: "bg-green-100 text-green-800",
-  CANCELLED: "bg-red-100 text-red-800",
-};
-
-const poStatusTransitions: Record<string, string[]> = {
-  PENDING: ["ORDERED", "CANCELLED"],
-  ORDERED: ["SHIPPED", "CANCELLED"],
-  SHIPPED: ["PARTIAL", "RECEIVED"],
-  PARTIAL: ["RECEIVED"],
-};
-
 const itemStatusColors: Record<string, string> = {
   PENDING: "bg-yellow-100 text-yellow-800",
   PURCHASED: "bg-blue-100 text-blue-800",
   IN_WAREHOUSE: "bg-green-100 text-green-800",
   CANCELLED: "bg-red-100 text-red-800",
   RETURNED: "bg-gray-100 text-gray-800",
+};
+
+const shipmentStatusColors: Record<string, string> = {
+  PENDING_PACKING: "bg-yellow-100 text-yellow-800",
+  IN_TRANSIT: "bg-purple-100 text-purple-800",
+  DELIVERED: "bg-green-100 text-green-800",
 };
 
 const itemStatusLabels: Record<string, string> = {
@@ -133,7 +116,6 @@ interface EditableItem {
   quantity: number;
   unitPriceCny: number;
   status: string;
-  isEditing: boolean;
 }
 
 interface NewItem {
@@ -147,7 +129,6 @@ export function PurchaseOrderDetailClient({
 }: PurchaseOrderDetailClientProps) {
   const router = useRouter();
   const [po, setPo] = useState(initialPO);
-  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
   const [poNotes, setPoNotes] = useState(po.notes ?? "");
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
@@ -160,7 +141,6 @@ export function PurchaseOrderDetailClient({
       quantity: item.quantity,
       unitPriceCny: item.unitPriceCny,
       status: item.status,
-      isEditing: false,
     }))
   );
 
@@ -175,31 +155,8 @@ export function PurchaseOrderDetailClient({
   >([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
 
-  const allowedTransitions = poStatusTransitions[po.status] ?? [];
   const allSelected =
     po.items.length > 0 && po.items.every((item) => selectedItemIds.has(item.id));
-
-  // ─── PO Status ─────────────────────────────────────
-
-  const handleStatusChange = useCallback(
-    async (newStatus: string) => {
-      setIsUpdatingStatus(true);
-      try {
-        const { updatePurchaseOrderStatus } = await import(
-          "@/actions/purchase-order.actions"
-        );
-        const result = await updatePurchaseOrderStatus(po.id, newStatus as any);
-        if (!result.success) throw new Error(result.error);
-        toast.success(`Status updated to ${newStatus}`);
-        setPo((prev) => ({ ...prev, status: newStatus }));
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to update status");
-      } finally {
-        setIsUpdatingStatus(false);
-      }
-    },
-    [po.id]
-  );
 
   // ─── PO Notes ──────────────────────────────────────
 
@@ -266,31 +223,6 @@ export function PurchaseOrderDetailClient({
     }
   }, [selectedItemIds, router]);
 
-  // ─── Edit item actions ─────────────────────────────
-
-  const startEditing = (id: string) => {
-    setEditableItems((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, isEditing: true } : item
-      )
-    );
-  };
-
-  const cancelEditing = (id: string) => {
-    setEditableItems((prev) =>
-      prev.map((item) => {
-        if (item.id !== id) return item;
-        const original = po.items.find((i) => i.id === id);
-        return {
-          ...item,
-          quantity: original?.quantity ?? item.quantity,
-          unitPriceCny: original?.unitPriceCny ?? item.unitPriceCny,
-          isEditing: false,
-        };
-      })
-    );
-  };
-
   const updateEditableField = (
     id: string,
     field: keyof EditableItem,
@@ -307,6 +239,15 @@ export function PurchaseOrderDetailClient({
     async (itemId: string) => {
       const item = editableItems.find((i) => i.id === itemId);
       if (!item) return;
+      const original = po.items.find((i) => i.id === itemId);
+      if (!original) return;
+
+      if (
+        original.quantity === item.quantity &&
+        original.unitPriceCny === item.unitPriceCny
+      ) {
+        return;
+      }
 
       try {
         const { updatePurchaseOrderItem } = await import(
@@ -329,15 +270,23 @@ export function PurchaseOrderDetailClient({
               : i
           ),
         }));
-        setEditableItems((prev) =>
-          prev.map((i) => (i.id === itemId ? { ...i, isEditing: false } : i))
-        );
         router.refresh();
       } catch (err) {
+        setEditableItems((prev) =>
+          prev.map((i) =>
+            i.id === itemId
+              ? {
+                  ...i,
+                  quantity: original.quantity,
+                  unitPriceCny: original.unitPriceCny,
+                }
+              : i
+          )
+        );
         toast.error(err instanceof Error ? err.message : "Failed to update item");
       }
     },
-    [editableItems, po.exchangeRate, router]
+    [editableItems, po.exchangeRate, po.items, router]
   );
 
   // ─── Item status change ────────────────────────────
@@ -468,8 +417,14 @@ export function PurchaseOrderDetailClient({
       minimumFractionDigits: 0,
     });
 
+  const fmtPlain = (n: number, digits = 2) =>
+    n.toLocaleString("en-US", {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-6">
       {/* Header */}
       <div className="mb-6">
         <Link
@@ -479,7 +434,7 @@ export function PurchaseOrderDetailClient({
           <ArrowLeft className="h-4 w-4 mr-1" />
           Back to Purchase Orders
         </Link>
-        <div className="flex items-center justify-between">
+        <div>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
               PO-{String(po.poNumber).padStart(4, "0")}
@@ -495,36 +450,8 @@ export function PurchaseOrderDetailClient({
               })}
             </p>
           </div>
-          <span
-            className={`inline-flex px-3 py-1 rounded-full text-sm font-medium ${
-              poStatusColors[po.status] ?? "bg-gray-100 text-gray-700"
-            }`}
-          >
-            {po.status}
-          </span>
         </div>
       </div>
-
-      {/* Status Actions */}
-      {allowedTransitions.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">Actions:</span>
-            {allowedTransitions.map((status) => (
-              <Button
-                key={status}
-                variant="outline"
-                size="sm"
-                onClick={() => handleStatusChange(status)}
-                disabled={isUpdatingStatus}
-              >
-                {isUpdatingStatus && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-                Mark as {status}
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Supplier & Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
@@ -535,12 +462,6 @@ export function PurchaseOrderDetailClient({
               <dt className="text-sm text-gray-500">Name</dt>
               <dd className="text-sm font-medium text-gray-900">
                 {po.supplierName ?? "N/A"}
-              </dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-sm text-gray-500">Contact</dt>
-              <dd className="text-sm font-medium text-gray-900">
-                {po.supplierContact ?? "N/A"}
               </dd>
             </div>
           </dl>
@@ -758,13 +679,12 @@ export function PurchaseOrderDetailClient({
                   />
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-600">Product</th>
-                <th className="text-right py-3 px-4 font-medium text-gray-600">SKU</th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">Qty</th>
+                <th className="text-right py-3 px-4 font-medium text-gray-600">Received</th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">Unit Price (CNY)</th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">Line Total (CNY)</th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">Line Total (LKR)</th>
                 <th className="text-center py-3 px-4 font-medium text-gray-600">Status</th>
-                <th className="text-center py-3 px-4 font-medium text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -787,59 +707,68 @@ export function PurchaseOrderDetailClient({
                       />
                     </td>
                     <td className="py-3 px-4">
-                      <span className="font-medium text-gray-900">
-                        {item.productName}
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
+                          {item.product?.images?.[0] ? (
+                            <img
+                              src={item.product.images[0].url}
+                              alt={item.productName}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">
+                              —
+                            </div>
+                          )}
+                        </div>
+                        <span className="font-medium text-gray-900">
+                          {item.productName}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <input
+                        type="number"
+                        min={1}
+                        value={edit?.quantity ?? item.quantity}
+                        onChange={(e) =>
+                          updateEditableField(
+                            item.id,
+                            "quantity",
+                            parseInt(e.target.value) || 1
+                          )
+                        }
+                        onBlur={() => saveItem(item.id)}
+                        className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-brand"
+                      />
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <span className={`font-medium ${item.quantityReceived >= item.quantity ? "text-green-600" : item.quantityReceived > 0 ? "text-orange-600" : "text-gray-400"}`}>
+                        {item.quantityReceived}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-right text-gray-500 font-mono text-xs">
-                      {item.productSku}
-                    </td>
                     <td className="py-3 px-4 text-right">
-                      {edit?.isEditing ? (
-                        <input
-                          type="number"
-                          min={1}
-                          value={edit.quantity}
-                          onChange={(e) =>
-                            updateEditableField(
-                              item.id,
-                              "quantity",
-                              parseInt(e.target.value) || 1
-                            )
-                          }
-                          className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:ring-2 focus:ring-brand"
-                        />
-                      ) : (
-                        <span className="text-gray-900">{item.quantity}</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      {edit?.isEditing ? (
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.01}
-                          value={edit.unitPriceCny}
-                          onChange={(e) =>
-                            updateEditableField(
-                              item.id,
-                              "unitPriceCny",
-                              parseFloat(e.target.value) || 0
-                            )
-                          }
-                          className="w-28 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:ring-2 focus:ring-brand"
-                        />
-                      ) : (
-                        <span className="text-gray-900">
-                          {fmtCny(item.unitPriceCny)}
-                        </span>
-                      )}
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={edit?.unitPriceCny ?? item.unitPriceCny}
+                        onChange={(e) =>
+                          updateEditableField(
+                            item.id,
+                            "unitPriceCny",
+                            parseFloat(e.target.value) || 0
+                          )
+                        }
+                        onBlur={() => saveItem(item.id)}
+                        className="w-28 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-brand"
+                      />
                     </td>
                     <td className="py-3 px-4 text-right text-gray-900">
-                      {fmtCny(item.lineTotalCny)}
+                      {fmtPlain(item.lineTotalCny)}
                     </td>
                     <td className="py-3 px-4 text-right text-gray-900">
-                      {fmtLkr(item.lineTotalLkr)}
+                      {fmtPlain(item.lineTotalLkr, 0)}
                     </td>
                     <td className="py-3 px-4 text-center">
                       <select
@@ -859,39 +788,12 @@ export function PurchaseOrderDetailClient({
                         ))}
                       </select>
                     </td>
-                    <td className="py-3 px-4 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        {edit?.isEditing ? (
-                          <>
-                            <button
-                              onClick={() => saveItem(item.id)}
-                              className="p-1 text-green-600 hover:text-green-700"
-                            >
-                              <Check className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => cancelEditing(item.id)}
-                              className="p-1 text-gray-400 hover:text-gray-600"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            onClick={() => startEditing(item.id)}
-                            className="p-1 text-brand hover:text-brand/80"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
                   </tr>
                 );
               })}
               {po.items.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-500">
+                  <td colSpan={8} className="py-12 text-center text-gray-500">
                     No items in this purchase order.
                   </td>
                 </tr>
@@ -919,7 +821,7 @@ export function PurchaseOrderDetailClient({
                   </Link>
                   <span
                     className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                      poStatusColors[shipment.status] ?? "bg-gray-100 text-gray-700"
+                      shipmentStatusColors[shipment.status] ?? "bg-gray-100 text-gray-700"
                     }`}
                   >
                     {shipment.status.replace(/_/g, " ")}

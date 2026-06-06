@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Eye, Package, ExternalLink, Trash2, Loader2 } from "lucide-react";
+import { Package, Trash2, Loader2 } from "lucide-react";
 import { deleteWarehouseShipments } from "@/actions/warehouse.actions";
 
 interface ShipmentRow {
@@ -12,24 +12,14 @@ interface ShipmentRow {
   shipmentNumber: number;
   status: string;
   totalWeight: number | null;
-  baseShippingCost: number | null;
+  shippingRatePerKg: number | null;
   extraCost: number | null;
   totalShippingCost: number | null;
   notes: string | null;
-  packedAt: Date | null;
   shippedAt: Date | null;
   deliveredAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  purchaseOrder: {
-    id: string;
-    poNumber: number;
-    supplierName: string | null;
-  };
-  packages: {
-    id: string;
-    weight: number | null;
-  }[];
   inventoryItemCount: number;
 }
 
@@ -39,14 +29,12 @@ interface WarehouseShipmentsTableProps {
 
 const statusColors: Record<string, string> = {
   PENDING_PACKING: "bg-yellow-100 text-yellow-800",
-  PACKED: "bg-blue-100 text-blue-800",
   IN_TRANSIT: "bg-purple-100 text-purple-800",
   DELIVERED: "bg-green-100 text-green-800",
 };
 
 const statusLabels: Record<string, string> = {
   PENDING_PACKING: "Pending Packing",
-  PACKED: "Packed",
   IN_TRANSIT: "In Transit",
   DELIVERED: "Delivered",
 };
@@ -155,13 +143,10 @@ export function WarehouseShipmentsTable({
                   Shipment
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-600">
-                  Purchase Order
-                </th>
-                <th className="text-left py-3 px-4 font-medium text-gray-600">
                   Status
                 </th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">
-                  Items
+                  Inv. Items
                 </th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">
                   Total Weight
@@ -171,9 +156,6 @@ export function WarehouseShipmentsTable({
                 </th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">
                   Date
-                </th>
-                <th className="text-center py-3 px-4 font-medium text-gray-600">
-                  View
                 </th>
               </tr>
             </thead>
@@ -202,16 +184,6 @@ export function WarehouseShipmentsTable({
                     </Link>
                   </td>
                   <td className="py-3 px-4">
-                    <Link
-                      href={`/admin/purchase-orders/${shipment.purchaseOrder.id}`}
-                      className="inline-flex items-center gap-1 text-brand hover:text-brand/80 font-medium text-xs"
-                    >
-                      PO-
-                      {String(shipment.purchaseOrder.poNumber).padStart(4, "0")}
-                      <ExternalLink size={11} />
-                    </Link>
-                  </td>
-                  <td className="py-3 px-4">
                     <span
                       className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
                         statusColors[shipment.status] ?? "bg-gray-100 text-gray-700"
@@ -227,7 +199,7 @@ export function WarehouseShipmentsTable({
                     </span>
                   </td>
                   <td className="py-3 px-4 text-right text-gray-900">
-                    {shipment.totalWeight
+                    {shipment.totalWeight !== null
                       ? `${shipment.totalWeight.toFixed(2)} kg`
                       : "-"}
                   </td>
@@ -241,22 +213,16 @@ export function WarehouseShipmentsTable({
                       year: "numeric",
                       month: "short",
                       day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
                     })}
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <Link
-                      href={`/admin/shipments/${shipment.id}`}
-                      className="inline-flex items-center text-brand hover:text-brand/80"
-                    >
-                      <Eye className="h-4 w-4" />
-                    </Link>
                   </td>
                 </tr>
               ))}
               {shipments.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-500">
-                    No shipments yet. Shipments are created from purchase orders.
+                  <td colSpan={7} className="py-12 text-center text-gray-500">
+                    No shipments yet. Create a shipment from warehouse inventory.
                   </td>
                 </tr>
               )}

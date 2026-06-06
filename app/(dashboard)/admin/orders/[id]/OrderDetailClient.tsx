@@ -50,6 +50,8 @@ interface OrderItemData {
   costs: number | null;
   discount: number | null;
   profit: number | null;
+  shippingCost: number | null;
+  handlerCost: number | null;
   competitorsPrice: number | null;
   globalPrice: number | null;
   basePrice: number | null;
@@ -63,8 +65,6 @@ interface OrderItemData {
     weight: number | null;
     images: { url: string }[];
     buyingPrice: number | null;
-    shippingCost: number | null;
-    handlerCost: number | null;
     competitorsPrice: number | null;
     globalPrice: number | null;
     price: number;
@@ -206,11 +206,11 @@ export function OrderDetailClient({ order, preOrders, itemStatuses }: Props) {
   // ─── Derived totals ─────────────────────────────────
   const orderTotal = items.reduce((sum, i) => sum + Number(i.price) * i.quantity, 0);
 
-  // Total costs = sum of (basePrice + product.shippingCost + product.handlerCost) * quantity
+  // Total costs = sum of (costs + shippingCost + handlerCost) * quantity
   const computeItemTotalCosts = (item: OrderItemData) => {
-    const basePrice = item.costs ?? 0;
-    const shippingCost = Number(item.product.shippingCost ?? 0);
-    const handlerCost = Number(item.product.handlerCost ?? 0);
+    const basePrice = Number(item.costs ?? 0);
+    const shippingCost = Number(item.shippingCost ?? 0);
+    const handlerCost = Number(item.handlerCost ?? 0);
     return (basePrice + shippingCost + handlerCost) * item.quantity;
   };
 
@@ -515,19 +515,14 @@ export function OrderDetailClient({ order, preOrders, itemStatuses }: Props) {
   const getItemValues = (item: OrderItemData) => {
     const qty = item.quantity;
     const sellingPrice = Number(item.price);
-    const discount = item.discount ?? 0;
+    const discount = Number(item.discount ?? 0);
 
-    // Base price = costs from the order item (globalPrice × current exchange rate)
-    // When costs is missing, fall back to product's buyingPrice (CNY × rate at product creation time)
-    const basePrice = item.costs ?? (
-      exchangeRate != null && item.globalPrice != null
-        ? Number(item.globalPrice) * exchangeRate
-        : Number(item.product.buyingPrice ?? 0)
-    );
+    // Base price = costs from the order item snapshot (no fallback to live product data)
+    const basePrice = Number(item.costs ?? 0);
 
-    // Shipping and Handler per unit (from product)
-    const shippingCost = Number(item.product.shippingCost ?? 0);
-    const handlerCost = Number(item.product.handlerCost ?? 0);
+    // Shipping and Handler per unit (snapshotted on the OrderItem)
+    const shippingCost = Number(item.shippingCost ?? 0);
+    const handlerCost = Number(item.handlerCost ?? 0);
 
     // Total costs (with qty) = (basePrice + shippingCost + handlerCost) * qty
     const totalItemCostPerUnit = basePrice + shippingCost + handlerCost;
@@ -869,9 +864,9 @@ export function OrderDetailClient({ order, preOrders, itemStatuses }: Props) {
                         />
                       </td>
 
-                      {/* Base Price */}
+                      {/* Base Price — show "—" when costs not snapshotted */}
                       <td className="px-3 py-3 text-right text-gray-900">
-                        {fmtCurrency(v.basePrice)}
+                        {item.costs != null ? fmtCurrency(v.basePrice) : "—"}
                       </td>
 
                       {/* Shipping & Handling (LKR) — (shipping + handler) × qty */}
@@ -1115,7 +1110,7 @@ export function OrderDetailClient({ order, preOrders, itemStatuses }: Props) {
                 {/* Mode toggle */}
                 <div className="flex gap-2 mb-4">
                   <button
-                    onClick={() => setSendMode("existing")}
+                    onClick={() => { setSendMode("existing"); setNewPOSupplierName(""); }}
                     className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
                       sendMode === "existing"
                         ? "bg-brand text-white border-brand"
@@ -1128,7 +1123,7 @@ export function OrderDetailClient({ order, preOrders, itemStatuses }: Props) {
                     onClick={() => setSendMode("new")}
                     className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
                       sendMode === "new"
-                        ? "bg-brand text-white border-brand"
+                        ? "bg-amber-600 text-white border-amber-600"
                         : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
                     }`}
                   >
@@ -1229,8 +1224,10 @@ export function OrderDetailClient({ order, preOrders, itemStatuses }: Props) {
                         <Loader2 className="h-4 w-4 animate-spin" />
                         Sending...
                       </>
+                    ) : sendMode === "new" ? (
+                      "Create New PO"
                     ) : (
-                      "Confirm"
+                      "Add to PO"
                     )}
                   </Button>
                 </div>

@@ -48,8 +48,7 @@ interface WarehouseInventoryTableProps {
 
 const shipmentStatusLabels: Record<string, string> = {
   PENDING_PACKING: "Pending Packing",
-  PACKED: "Packed",
-  SHIPPED: "Shipped",
+  IN_TRANSIT: "In Transit",
   DELIVERED: "Delivered",
 };
 
@@ -65,21 +64,30 @@ export function WarehouseInventoryTable({
     open: boolean;
     itemId: string;
     currentShipmentId: string | null;
-    purchaseOrderId: string;
-  }>({ open: false, itemId: "", currentShipmentId: null, purchaseOrderId: "" });
+    selectedShipmentId: string | null;
+    assignQuantity: number;
+  }>({
+    open: false,
+    itemId: "",
+    currentShipmentId: null,
+    selectedShipmentId: null,
+    assignQuantity: 1,
+  });
 
   // Create shipment modal state
   const [createModal, setCreateModal] = useState<{
     open: boolean;
-    purchaseOrderId: string;
     name: string;
     saving: boolean;
-  }>({ open: false, purchaseOrderId: "", name: "", saving: false });
+  }>({ open: false, name: "", saving: false });
 
   const handleAssignShipment = useCallback(
-    async (itemId: string, shipmentId: string | null) => {
+    async (itemId: string, shipmentId: string | null, assignQuantity?: number) => {
       setSavingIds((prev) => new Set(prev).add(itemId));
-      const result = await updateInventoryItem(itemId, { shipmentId });
+      const result = await updateInventoryItem(itemId, {
+        shipmentId,
+        ...(shipmentId ? { assignQuantity } : {}),
+      });
       setSavingIds((prev) => {
         const next = new Set(prev);
         next.delete(itemId);
@@ -87,44 +95,32 @@ export function WarehouseInventoryTable({
       });
 
       if (result.success) {
-        setItems((prev) =>
-          prev.map((item) => {
-            if (item.id !== itemId) return item;
-            const shipment = shipmentId
-              ? shipments.find((s) => s.id === shipmentId)
-              : null;
-            return {
-              ...item,
-              shipmentId,
-              shipmentNumber: shipment?.shipmentNumber ?? null,
-              shipmentStatus: shipment?.status ?? null,
-            };
-          })
-        );
+        window.location.reload();
+        return;
+      } else {
+        alert(result.error);
       }
       setAssignModal({
         open: false,
         itemId: "",
         currentShipmentId: null,
-        purchaseOrderId: "",
+        selectedShipmentId: null,
+        assignQuantity: 1,
       });
     },
-    [shipments]
+    []
   );
 
   const handleCreateShipment = useCallback(async () => {
     setCreateModal((prev) => ({ ...prev, saving: true }));
-    const result = await createWarehouseShipment(
-      createModal.purchaseOrderId,
-      createModal.name || null
-    );
+    const result = await createWarehouseShipment(createModal.name || null);
     if (result.success) {
       window.location.reload();
     } else {
       alert(result.error);
       setCreateModal((prev) => ({ ...prev, saving: false }));
     }
-  }, [createModal.purchaseOrderId, createModal.name]);
+  }, [createModal.name]);
 
   const handleWeightChange = useCallback(
     async (itemId: string, weight: number | null) => {
@@ -142,11 +138,18 @@ export function WarehouseInventoryTable({
   const pendingShipments = shipments.filter(
     (s) => s.status === "PENDING_PACKING"
   );
+  const assignItem = items.find((item) => item.id === assignModal.itemId);
+  const assignQuantityMax = assignItem?.quantity ?? 1;
+  const availableShipments = pendingShipments;
 
   const getShipmentLabel = (s: ShipmentOption) => {
     const num = `SHIP-${String(s.shipmentNumber).padStart(4, "0")}`;
     return s.name ? `${num} — ${s.name}` : num;
   };
+  const totalWeight = items.reduce(
+    (sum, item) => sum + (item.weight ?? 0) * item.quantity,
+    0
+  );
 
   return (
     <>
@@ -157,6 +160,16 @@ export function WarehouseInventoryTable({
           </h1>
           <p className="text-gray-600 text-sm mt-1">
             {items.length} item{items.length !== 1 ? "s" : ""} in warehouse
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-sm text-gray-500">Total Weight</p>
+          <p className="text-2xl font-bold text-gray-900">
+            {totalWeight.toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}{" "}
+            kg
           </p>
         </div>
       </div>
@@ -207,12 +220,22 @@ export function WarehouseInventoryTable({
                             className="w-10 h-10 rounded object-cover"
                           />
                         )}
-                        <Link
-                          href={`/admin/purchase-orders/${item.purchaseOrderId}`}
-                          className="font-medium text-gray-900 hover:text-brand transition-colors"
-                        >
-                          {item.productName}
-                        </Link>
+                        <div>
+                          <Link
+                            href={`/admin/products/${item.productId}`}
+                            className="font-medium text-gray-900 hover:text-brand transition-colors"
+                          >
+                            {item.productName}
+                          </Link>
+                          {item.product?.slug && (
+                            <div className="text-xs text-gray-400 mt-0.5">
+                              Stock: <span className={item.product.stock > 0 ? "text-green-600" : "text-red-600"}>{item.product.stock}</span>
+                              {item.product.reservedStock > 0 && (
+                                <span className="text-amber-600 ml-1">| Reserved: {item.product.reservedStock}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </td>
 
@@ -275,7 +298,8 @@ export function WarehouseInventoryTable({
                                 open: true,
                                 itemId: item.id,
                                 currentShipmentId: item.shipmentId,
-                                purchaseOrderId: item.purchaseOrderId,
+                                selectedShipmentId: item.shipmentId,
+                                assignQuantity: item.quantity,
                               })
                             }
                             className="text-xs text-gray-400 hover:text-gray-600 ml-1"
@@ -290,7 +314,8 @@ export function WarehouseInventoryTable({
                               open: true,
                               itemId: item.id,
                               currentShipmentId: null,
-                              purchaseOrderId: item.purchaseOrderId,
+                              selectedShipmentId: null,
+                              assignQuantity: item.quantity,
                             })
                           }
                           disabled={savingIds.has(item.id)}
@@ -357,7 +382,8 @@ export function WarehouseInventoryTable({
                     open: false,
                     itemId: "",
                     currentShipmentId: null,
-                    purchaseOrderId: "",
+                    selectedShipmentId: null,
+                    assignQuantity: 1,
                   })
                 }
                 className="text-gray-400 hover:text-gray-600"
@@ -365,12 +391,12 @@ export function WarehouseInventoryTable({
                 <X size={20} />
               </button>
             </div>
-            <div className="px-6 py-4 space-y-3 max-h-80 overflow-y-auto">
-              {pendingShipments.length === 0 ? (
+            <div className="px-6 py-4 space-y-4 max-h-96 overflow-y-auto">
+              {availableShipments.length === 0 ? (
                 <div className="text-center py-6">
                   <Package size={40} className="mx-auto text-gray-300 mb-3" />
                   <p className="text-gray-500 text-sm mb-4">
-                    No pending shipments available. Create a new one to assign
+                    No pending shipments are available. Create a new one to assign
                     this item.
                   </p>
                   <button
@@ -379,12 +405,12 @@ export function WarehouseInventoryTable({
                         open: false,
                         itemId: "",
                         currentShipmentId: null,
-                        purchaseOrderId: "",
+                        selectedShipmentId: null,
+                        assignQuantity: 1,
                       });
                       setTimeout(() => {
                         setCreateModal({
                           open: true,
-                          purchaseOrderId: assignModal.purchaseOrderId,
                           name: "",
                           saving: false,
                         });
@@ -398,25 +424,54 @@ export function WarehouseInventoryTable({
                 </div>
               ) : (
                 <>
-                  <button
-                    onClick={() =>
-                      handleAssignShipment(assignModal.itemId, null)
-                    }
-                    className={`w-full text-left px-4 py-2.5 rounded-lg border text-sm transition-colors ${
-                      assignModal.currentShipmentId === null
-                        ? "border-brand bg-brand/5 text-brand font-medium"
-                        : "border-gray-200 text-gray-600 hover:border-gray-300"
-                    }`}
-                  >
-                    Not assigned
-                  </button>
-                  {pendingShipments.map((s) => {
-                    const isSelected = assignModal.currentShipmentId === s.id;
+                  {assignModal.currentShipmentId ? (
+                    <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+                      <p className="text-sm font-medium text-gray-900">
+                        Assigned quantity: {assignQuantityMax}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        This row can be moved to another pending shipment or unassigned.
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                        Quantity to assign
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={assignQuantityMax}
+                        value={assignModal.assignQuantity}
+                        onChange={(e) => {
+                          const value = Number(e.target.value);
+                          setAssignModal((prev) => ({
+                            ...prev,
+                            assignQuantity: Number.isFinite(value)
+                              ? Math.min(Math.max(1, Math.trunc(value)), assignQuantityMax)
+                              : 1,
+                          }));
+                        }}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Available in this row: {assignQuantityMax}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-700">Shipment</p>
+                    {availableShipments.map((s) => {
+                    const isSelected = assignModal.selectedShipmentId === s.id;
                     return (
                       <button
                         key={s.id}
                         onClick={() =>
-                          handleAssignShipment(assignModal.itemId, s.id)
+                          setAssignModal((prev) => ({
+                            ...prev,
+                            selectedShipmentId: s.id,
+                          }))
                         }
                         className={`w-full text-left px-4 py-2.5 rounded-lg border text-sm transition-colors ${
                           isSelected
@@ -433,23 +488,57 @@ export function WarehouseInventoryTable({
                       </button>
                     );
                   })}
+                  </div>
                 </>
               )}
             </div>
-            <div className="px-6 py-3 border-t border-gray-100 flex justify-end">
+            <div className="px-6 py-3 border-t border-gray-100 flex justify-between gap-2">
+              {assignModal.currentShipmentId && (
+                <button
+                  onClick={() => handleAssignShipment(assignModal.itemId, null)}
+                  disabled={savingIds.has(assignModal.itemId)}
+                  className="px-4 py-2 text-sm text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
+                >
+                  Unassign
+                </button>
+              )}
+              <div className="ml-auto flex gap-2">
               <button
                 onClick={() =>
                   setAssignModal({
                     open: false,
                     itemId: "",
                     currentShipmentId: null,
-                    purchaseOrderId: "",
+                    selectedShipmentId: null,
+                    assignQuantity: 1,
                   })
                 }
                 className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium"
               >
                 Cancel
               </button>
+              {availableShipments.length > 0 && (
+                <button
+                  onClick={() => {
+                    if (!assignModal.selectedShipmentId) {
+                      alert("Select a shipment first");
+                      return;
+                    }
+                    handleAssignShipment(
+                      assignModal.itemId,
+                      assignModal.selectedShipmentId,
+                      assignModal.assignQuantity
+                    );
+                  }}
+                  disabled={savingIds.has(assignModal.itemId)}
+                  className="px-4 py-2 text-sm text-white bg-brand rounded-lg hover:bg-brand/90 font-medium disabled:opacity-50"
+                >
+                  {assignModal.currentShipmentId
+                    ? `Move ${assignQuantityMax}`
+                    : `Assign ${assignModal.assignQuantity}`}
+                </button>
+              )}
+              </div>
             </div>
           </div>
         </div>
@@ -467,7 +556,6 @@ export function WarehouseInventoryTable({
                 onClick={() =>
                   setCreateModal({
                     open: false,
-                    purchaseOrderId: "",
                     name: "",
                     saving: false,
                   })
@@ -479,8 +567,8 @@ export function WarehouseInventoryTable({
             </div>
             <div className="px-6 py-6 space-y-4">
               <p className="text-gray-600 text-sm">
-                A new shipment will be created for items from this purchase
-                order. You can assign other items to it later.
+                A new shipment will be created. You can assign warehouse
+                inventory items to it after creation.
               </p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -507,7 +595,7 @@ export function WarehouseInventoryTable({
                 }`}
               >
                 <Truck size={16} />
-                {createModal.saving ? "Creating..." : "Create & Assign"}
+                {createModal.saving ? "Creating..." : "Create Shipment"}
               </button>
             </div>
           </div>

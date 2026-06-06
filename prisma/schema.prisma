@@ -216,19 +216,21 @@ model Order {
 }
 
 model OrderItem {
-  id               String        @id @default(uuid())
+  id               String         @id @default(uuid())
   quantity         Int
-  price            Decimal       @db.Decimal(10, 2)
+  price            Decimal        @db.Decimal(10, 2)
   orderId          String
   productId        String
-  basePrice        Decimal?      @db.Decimal(10, 2)
-  competitorsPrice Decimal?      @db.Decimal(10, 2)
-  costs            Decimal?      @db.Decimal(10, 2)
-  discount         Decimal?      @db.Decimal(10, 2)
-  globalPrice      Decimal?      @db.Decimal(10, 2)
-  profit           Decimal?      @db.Decimal(10, 2)
-  order            Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product          Product       @relation(fields: [productId], references: [id])
+  basePrice        Decimal?       @db.Decimal(10, 2)
+  competitorsPrice Decimal?       @db.Decimal(10, 2)
+  costs            Decimal?       @db.Decimal(10, 2)
+  discount         Decimal?       @db.Decimal(10, 2)
+  globalPrice      Decimal?       @db.Decimal(10, 2)
+  profit           Decimal?       @db.Decimal(10, 2)
+  shippingCost     Decimal?       @db.Decimal(10, 2)
+  handlerCost      Decimal?       @db.Decimal(10, 2)
+  order            Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product          Product        @relation(fields: [productId], references: [id])
   preOrderItems    PreOrderItem[] @relation("OrderItemPreOrder")
 
   @@index([orderId])
@@ -325,21 +327,15 @@ model PurchaseOrder {
   id              String                   @id @default(uuid())
   poNumber        Int                      @default(autoincrement())
   supplierName    String?
-  supplierContact String?
-  status          PurchaseOrderStatus      @default(PENDING)
   totalCny        Decimal                  @db.Decimal(12, 2)
   exchangeRate    Decimal                  @db.Decimal(12, 4)
   totalLkr        Decimal                  @db.Decimal(12, 2)
   notes           String?
-  orderedAt       DateTime?
-  receivedAt      DateTime?
   createdAt       DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
   items           PurchaseOrderItem[]
   inventoryItems  WarehouseInventoryItem[]
-  shipments       WarehouseShipment[]
 
-  @@index([status])
   @@index([createdAt])
   @@index([poNumber])
 }
@@ -356,7 +352,6 @@ model PurchaseOrderItem {
   lineTotalLkr     Decimal                @db.Decimal(12, 2)
   quantityReceived Int                    @default(0)
   status           POItemStatus           @default(PENDING)
-  notes            String?
   preOrderItems    PreOrderItem[]
   product          Product                @relation(fields: [productId], references: [id])
   purchaseOrder    PurchaseOrder          @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
@@ -381,14 +376,12 @@ model PreOrderItem {
 model WarehouseShipment {
   id                String                   @id @default(uuid())
   shipmentNumber    Int                      @default(autoincrement())
-  purchaseOrderId   String
   status            ShipmentStatus           @default(PENDING_PACKING)
   totalWeight       Decimal?                 @db.Decimal(10, 2)
-  baseShippingCost  Decimal?                 @db.Decimal(10, 2)
+  shippingRatePerKg Decimal?                 @db.Decimal(10, 2)
   extraCost         Decimal?                 @db.Decimal(10, 2)
   totalShippingCost Decimal?                 @db.Decimal(10, 2)
   notes             String?
-  packedAt          DateTime?
   shippedAt         DateTime?
   deliveredAt       DateTime?
   createdAt         DateTime                 @default(now())
@@ -396,9 +389,7 @@ model WarehouseShipment {
   name              String?
   inventoryItems    WarehouseInventoryItem[]
   packages          WarehousePackage[]
-  purchaseOrder     PurchaseOrder            @relation(fields: [purchaseOrderId], references: [id])
 
-  @@index([purchaseOrderId])
   @@index([status])
 }
 
@@ -461,15 +452,6 @@ enum OrderStatus {
   AWAITING_STOCK
 }
 
-enum PurchaseOrderStatus {
-  PENDING
-  ORDERED
-  SHIPPED
-  PARTIAL
-  RECEIVED
-  CANCELLED
-}
-
 enum POItemStatus {
   PENDING
   PURCHASED
@@ -480,7 +462,6 @@ enum POItemStatus {
 
 enum ShipmentStatus {
   PENDING_PACKING
-  PACKED
   IN_TRANSIT
   DELIVERED
 }

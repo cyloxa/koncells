@@ -17,7 +17,6 @@ interface LineItem {
   productId: string;
   quantity: number;
   unitPriceCny: number;
-  notes: string;
 }
 
 interface CreateOrderClientProps {
@@ -31,13 +30,12 @@ export function CreateOrderClient({
 }: CreateOrderClientProps) {
   const router = useRouter();
   const [supplierName, setSupplierName] = useState("");
-  const [supplierContact, setSupplierContact] = useState("");
   const [notes, setNotes] = useState("");
-  const [items, setItems] = useState<LineItem[]>([{ productId: "", quantity: 1, unitPriceCny: 0, notes: "" }]);
+  const [items, setItems] = useState<LineItem[]>([{ productId: "", quantity: 1, unitPriceCny: 0 }]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const addItem = () => {
-    setItems((prev) => [...prev, { productId: "", quantity: 1, unitPriceCny: 0, notes: "" }]);
+    setItems((prev) => [...prev, { productId: "", quantity: 1, unitPriceCny: 0 }]);
   };
 
   const removeItem = (index: number) => {
@@ -76,12 +74,10 @@ export function CreateOrderClient({
         const { createPurchaseOrder } = await import("@/actions/purchase-order.actions");
         const result = await createPurchaseOrder({
           supplierName: supplierName.trim(),
-          supplierContact: supplierContact.trim() || null,
           items: items.map((i) => ({
             productId: i.productId,
             quantity: i.quantity,
             unitPriceCny: i.unitPriceCny,
-            notes: i.notes || null,
           })),
           notes: notes.trim() || null,
         });
@@ -99,7 +95,7 @@ export function CreateOrderClient({
         setIsSubmitting(false);
       }
     },
-    [items, supplierName, supplierContact, notes, router]
+    [items, supplierName, notes, router]
   );
 
   return (
@@ -120,7 +116,7 @@ export function CreateOrderClient({
         {/* Supplier Section */}
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Supplier Details</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Supplier Name <span className="text-red-500">*</span>
@@ -132,16 +128,6 @@ export function CreateOrderClient({
                 placeholder="Supplier name"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand focus:border-brand"
                 required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contact</label>
-              <input
-                type="text"
-                value={supplierContact}
-                onChange={(e) => setSupplierContact(e.target.value)}
-                placeholder="Phone or email"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand focus:border-brand"
               />
             </div>
           </div>

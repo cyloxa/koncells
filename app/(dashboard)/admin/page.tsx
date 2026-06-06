@@ -49,7 +49,7 @@ export default async function AdminPage() {
     lowStockProductsDetailed,
     totalReviews,
     pendingPreOrders,
-    openPurchaseOrders,
+    openPurchaseOrderItems,
   ] = await Promise.all([
     prisma.product.count(),
     prisma.order.count(),
@@ -103,10 +103,13 @@ export default async function AdminPage() {
     }),
     prisma.review.count(),
     getPreOrdersCount(),
-    prisma.purchaseOrder.count({
-      where: { status: { in: ["PENDING", "ORDERED", "SHIPPED", "PARTIAL"] } },
+    prisma.purchaseOrderItem.findMany({
+      where: { status: { in: ["PENDING", "PURCHASED"] } },
+      distinct: ["purchaseOrderId"],
+      select: { purchaseOrderId: true },
     }),
   ]);
+  const openPurchaseOrders = openPurchaseOrderItems.length;
 
   const lowStockItems = lowStockProductsDetailed
     .map((p) => ({

@@ -195,8 +195,7 @@ const [product, relatedProducts] = await Promise.all([
 1. Edit `prisma/schema.prisma`
 2. Run `npx prisma migrate dev --name <description>`
 3. Update `types/index.ts` with the new TypeScript interface
-4. Add seed data to `prisma/seed.ts` if applicable
-5. Update relevant Server Actions and API routes
+4. Update relevant Server Actions and API routes
 
 ---
 

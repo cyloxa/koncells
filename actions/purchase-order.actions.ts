@@ -11,14 +11,12 @@ type ActionResult<T = void> =
 
 const createPurchaseOrderSchema = z.object({
   supplierName: z.string().min(1, "Supplier name is required"),
-  supplierContact: z.string().optional().nullable(),
   items: z
     .array(
       z.object({
         productId: z.string(),
         quantity: z.number().int().min(1),
         unitPriceCny: z.number().min(0),
-        notes: z.string().optional().nullable(),
       })
     )
     .min(1),
@@ -72,7 +70,6 @@ export async function createPurchaseOrder(
           unitPriceCny: item.unitPriceCny,
           lineTotalCny: lineCny,
           lineTotalLkr: lineLkr,
-          notes: item.notes ?? null,
         };
       })
     );
@@ -80,12 +77,10 @@ export async function createPurchaseOrder(
     const purchaseOrder = await prisma.purchaseOrder.create({
       data: {
         supplierName: parsed.data.supplierName,
-        supplierContact: parsed.data.supplierContact ?? null,
         totalCny,
         exchangeRate: rate,
         totalLkr,
         notes: parsed.data.notes ?? null,
-        status: "PENDING",
         items: { create: itemsData },
       },
     });
@@ -115,7 +110,6 @@ export async function getPurchaseOrders() {
       id: o.id,
       poNumber: o.poNumber,
       supplierName: o.supplierName,
-      status: o.status,
       totalCny: Number(o.totalCny),
       exchangeRate: Number(o.exchangeRate),
       totalLkr: Number(o.totalLkr),
@@ -163,24 +157,37 @@ export async function getPurchaseOrderById(id: string) {
           },
         },
       },
-      shipments: {
-        include: {
-          packages: {
-            include: {
-              items: {
-                include: {
-                  purchaseOrderItem: { select: { productName: true, productSku: true } },
-                },
-              },
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      },
     },
   });
 
   if (!po) return null;
+
+  const shipments = await prisma.warehouseShipment.findMany({
+    where: { inventoryItems: { some: { purchaseOrderId: id } } },
+    select: {
+      id: true,
+      shipmentNumber: true,
+      status: true,
+      totalWeight: true,
+      shippingRatePerKg: true,
+      extraCost: true,
+      totalShippingCost: true,
+      notes: true,
+      shippedAt: true,
+      deliveredAt: true,
+      createdAt: true,
+      packages: {
+        include: {
+          items: {
+            include: {
+              purchaseOrderItem: { select: { productName: true, productSku: true } },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
 
   return {
     ...po,
@@ -208,6 +215,8 @@ export async function getPurchaseOrderById(id: string) {
           competitorsPrice: pre.orderItem.competitorsPrice ? Number(pre.orderItem.competitorsPrice) : null,
           globalPrice: pre.orderItem.globalPrice ? Number(pre.orderItem.globalPrice) : null,
           basePrice: pre.orderItem.basePrice ? Number(pre.orderItem.basePrice) : null,
+          shippingCost: pre.orderItem.shippingCost ? Number(pre.orderItem.shippingCost) : null,
+          handlerCost: pre.orderItem.handlerCost ? Number(pre.orderItem.handlerCost) : null,
         },
         purchaseOrderItem: {
           ...pre.purchaseOrderItem,
@@ -217,10 +226,10 @@ export async function getPurchaseOrderById(id: string) {
         },
       })),
     })),
-    shipments: po.shipments.map((s) => ({
+    shipments: shipments.map((s) => ({
       ...s,
       totalWeight: s.totalWeight ? Number(s.totalWeight) : null,
-      baseShippingCost: s.baseShippingCost ? Number(s.baseShippingCost) : null,
+      shippingRatePerKg: s.shippingRatePerKg ? Number(s.shippingRatePerKg) : null,
       extraCost: s.extraCost ? Number(s.extraCost) : null,
       totalShippingCost: s.totalShippingCost ? Number(s.totalShippingCost) : null,
       packages: s.packages.map((pkg) => ({
@@ -234,54 +243,6 @@ export async function getPurchaseOrderById(id: string) {
   };
 }
 
-export async function updatePurchaseOrderStatus(
-  id: string,
-  status: "ORDERED" | "RECEIVED" | "CANCELLED"
-): Promise<ActionResult<{ success: true }>> {
-  const session = await auth();
-  if (session?.user?.role !== "ADMIN") return { success: false, error: "Unauthorized" };
-
-  const validTransitions: Record<string, string[]> = {
-    PENDING: ["ORDERED", "CANCELLED"],
-    ORDERED: ["SHIPPED", "CANCELLED"],
-    SHIPPED: ["PARTIAL", "RECEIVED"],
-    PARTIAL: ["RECEIVED"],
-  };
-
-  try {
-    const current = await prisma.purchaseOrder.findUnique({
-      where: { id },
-      select: { status: true },
-    });
-
-    if (!current) return { success: false, error: "Purchase order not found" };
-
-    const allowed = validTransitions[current.status] ?? [];
-    if (!allowed.includes(status)) {
-      return {
-        success: false,
-        error: `Cannot transition from ${current.status} to ${status}`,
-      };
-    }
-
-    const updateData: Record<string, unknown> = { status };
-    if (status === "ORDERED") updateData.orderedAt = new Date();
-    if (status === "RECEIVED") updateData.receivedAt = new Date();
-
-    await prisma.purchaseOrder.update({
-      where: { id },
-      data: updateData,
-    });
-
-    revalidatePath("/admin/purchase-orders");
-    revalidatePath(`/admin/purchase-orders/${id}`);
-    return { success: true, data: { success: true } };
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "Failed to update status";
-    return { success: false, error: message };
-  }
-}
-
 // ─── Add items to existing PO ───────────────────────────
 
 const addItemsSchema = z.object({
@@ -292,7 +253,6 @@ const addItemsSchema = z.object({
         productId: z.string(),
         quantity: z.number().int().min(1),
         unitPriceCny: z.number().min(0),
-        notes: z.string().optional().nullable(),
       })
     )
     .min(1),
@@ -311,13 +271,10 @@ export async function addItemsToPurchaseOrder(
     const result = await prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findUnique({
         where: { id: parsed.data.purchaseOrderId },
-        select: { id: true, exchangeRate: true, status: true },
+        select: { id: true, exchangeRate: true },
       });
 
       if (!po) throw new Error("Purchase order not found");
-      if (po.status !== "PENDING" && po.status !== "ORDERED") {
-        throw new Error("Can only add items to PENDING or ORDERED purchase orders");
-      }
 
       // Check for duplicate product IDs already on this PO
       const existingProductIds = new Set(
@@ -363,7 +320,6 @@ export async function addItemsToPurchaseOrder(
             unitPriceCny: item.unitPriceCny,
             lineTotalCny: item.unitPriceCny * item.quantity,
             lineTotalLkr: item.unitPriceCny * item.quantity * rate,
-            notes: item.notes ?? null,
           };
         })
       );
@@ -478,15 +434,25 @@ export async function updatePurchaseOrderItemStatus(
       })
     )?.status;
 
+    const receivedQuantity =
+      status === "IN_WAREHOUSE" && item.quantityReceived === 0
+        ? item.quantity
+        : item.quantityReceived;
+
     await prisma.purchaseOrderItem.update({
       where: { id: poItemId },
-      data: { status },
+      data: {
+        status,
+        ...(status === "IN_WAREHOUSE" && item.quantityReceived === 0
+          ? { quantityReceived: receivedQuantity }
+          : {}),
+      },
     });
 
     // When status changes to IN_WAREHOUSE, create a warehouse inventory item
     // Use quantityReceived (what was actually received) not quantity (what was ordered).
     // Delete any existing IN_WAREHOUSE records first to avoid duplicates from status toggling.
-    if (status === "IN_WAREHOUSE" && previousStatus !== "IN_WAREHOUSE") {
+    if (status === "IN_WAREHOUSE") {
       await prisma.warehouseInventoryItem.deleteMany({
         where: {
           purchaseOrderId: item.purchaseOrderId,
@@ -500,7 +466,7 @@ export async function updatePurchaseOrderItemStatus(
           purchaseOrderId: item.purchaseOrderId,
           productId: item.productId,
           productName: item.productName,
-          quantity: item.quantityReceived,
+          quantity: receivedQuantity,
           status: "IN_WAREHOUSE",
         },
       });
@@ -526,7 +492,7 @@ export async function updatePurchaseOrderItemStatus(
   }
 }
 
-// ─── Update PO item quantity / price / notes ───────────
+// ─── Update PO item quantity / price ───────────────────
 
 const UpdatePOItemSchema = z.object({
   poItemId: z.string(),
@@ -549,7 +515,7 @@ export async function updatePurchaseOrderItem(
     const poItem = await prisma.purchaseOrderItem.findUnique({
       where: { id: parsed.data.poItemId },
       include: {
-        purchaseOrder: { select: { id: true, status: true, exchangeRate: true } },
+        purchaseOrder: { select: { id: true, exchangeRate: true } },
         preOrderItems: {
           include: {
             orderItem: {
@@ -563,9 +529,6 @@ export async function updatePurchaseOrderItem(
     if (!poItem) return { success: false, error: "Purchase order item not found" };
 
     const po = poItem.purchaseOrder;
-    if (po.status !== "PENDING" && po.status !== "ORDERED") {
-      return { success: false, error: "Can only update items on PENDING or ORDERED purchase orders" };
-    }
 
     const rate = Number(po.exchangeRate);
     const currentQty = poItem.quantity;
@@ -581,11 +544,32 @@ export async function updatePurchaseOrderItem(
       where: { id: parsed.data.poItemId },
       data: {
         quantity: newQty,
+        ...(poItem.status === "IN_WAREHOUSE" ? { quantityReceived: newQty } : {}),
         unitPriceCny: newPrice,
         lineTotalCny: newLineCny,
         lineTotalLkr: newLineLkr,
       },
     });
+
+    if (poItem.status === "IN_WAREHOUSE") {
+      await prisma.warehouseInventoryItem.deleteMany({
+        where: {
+          purchaseOrderId: po.id,
+          productId: poItem.productId,
+          status: "IN_WAREHOUSE",
+        },
+      });
+
+      await prisma.warehouseInventoryItem.create({
+        data: {
+          purchaseOrderId: po.id,
+          productId: poItem.productId,
+          productName: poItem.productName,
+          quantity: newQty,
+          status: "IN_WAREHOUSE",
+        },
+      });
+    }
 
     // Recalculate PO-level totals
     const allItems = await prisma.purchaseOrderItem.findMany({
@@ -663,7 +647,7 @@ export async function deletePurchaseOrderItem(
     const poItem = await prisma.purchaseOrderItem.findUnique({
       where: { id: poItemId },
       include: {
-        purchaseOrder: { select: { id: true, status: true } },
+        purchaseOrder: { select: { id: true } },
         preOrderItems: { select: { id: true } },
       },
     });
@@ -671,9 +655,6 @@ export async function deletePurchaseOrderItem(
     if (!poItem) return { success: false, error: "Purchase order item not found" };
 
     const po = poItem.purchaseOrder;
-    if (po.status !== "PENDING" && po.status !== "ORDERED") {
-      return { success: false, error: "Can only delete items from PENDING or ORDERED purchase orders" };
-    }
 
     if (poItem.preOrderItems.length > 0) {
       await prisma.preOrderItem.deleteMany({
@@ -738,33 +719,15 @@ export async function deletePurchaseOrders(
         });
       }
 
-      // 3. Delete WarehousePackages (via shipments cascade) — first get shipment IDs
-      const shipmentIds = await prisma.warehouseShipment.findMany({
-        where: { purchaseOrderId: poId },
-        select: { id: true },
-      });
-
-      // 4. Delete WarehousePackages first (will cascade package items)
-      for (const sid of shipmentIds.map((s) => s.id)) {
-        await prisma.warehousePackage.deleteMany({
-          where: { warehouseShipmentId: sid },
-        });
-      }
-
-      // 5. Delete WarehouseInventoryItems
+      // 3. Delete WarehouseInventoryItems from this PO.
       await prisma.warehouseInventoryItem.deleteMany({
-        where: { purchaseOrderId: poId },
-      });
-
-      // 6. Delete WarehouseShipments (packages already cleaned up)
-      await prisma.warehouseShipment.deleteMany({
         where: { purchaseOrderId: poId },
       });
     }
 
     // Now delete the purchase orders (items cascade automatically)
     await prisma.purchaseOrder.deleteMany({
-      where: { id: { in: ids }, status: { notIn: ["RECEIVED"] } },
+      where: { id: { in: ids } },
     });
 
     revalidatePath("/admin/purchase-orders");
@@ -805,6 +768,7 @@ export async function getWarehouseInventory() {
   if (session?.user?.role !== "ADMIN") throw new Error("Unauthorized");
 
   const items = await prisma.warehouseInventoryItem.findMany({
+    where: { status: "IN_WAREHOUSE", shipmentId: null },
     include: {
       purchaseOrder: {
         select: {
@@ -868,6 +832,7 @@ export async function updateInventoryItem(
   inventoryItemId: string,
   data: {
     shipmentId?: string | null;
+    assignQuantity?: number;
     weight?: number | null;
   }
 ): Promise<ActionResult<{ success: true }>> {
@@ -875,16 +840,169 @@ export async function updateInventoryItem(
   if (session?.user?.role !== "ADMIN") return { success: false, error: "Unauthorized" };
 
   try {
+    if (data.shipmentId !== undefined && data.shipmentId !== null) {
+      const inventoryItem = await prisma.warehouseInventoryItem.findUnique({
+        where: { id: inventoryItemId },
+        select: {
+          id: true,
+          purchaseOrderId: true,
+          productId: true,
+          productName: true,
+          quantity: true,
+          weight: true,
+          status: true,
+          shipmentId: true,
+        },
+      });
+
+      if (!inventoryItem) return { success: false, error: "Inventory item not found" };
+      if (inventoryItem.status !== "IN_WAREHOUSE") {
+        return { success: false, error: "Only warehouse inventory can be assigned to shipments" };
+      }
+
+      const shipment = await prisma.warehouseShipment.findUnique({
+        where: { id: data.shipmentId },
+        select: { id: true, status: true },
+      });
+
+      if (!shipment) return { success: false, error: "Shipment not found" };
+      if (shipment.status !== "PENDING_PACKING") {
+        return { success: false, error: "Can only assign items to pending packing shipments" };
+      }
+
+      const assignQuantity = data.assignQuantity ?? inventoryItem.quantity;
+      if (!Number.isInteger(assignQuantity) || assignQuantity < 1) {
+        return { success: false, error: "Assign quantity must be at least 1" };
+      }
+      if (assignQuantity > inventoryItem.quantity) {
+        return { success: false, error: "Assign quantity cannot exceed warehouse quantity" };
+      }
+
+      await prisma.$transaction(async (tx) => {
+        const assignedWeight =
+          data.weight !== undefined ? data.weight : inventoryItem.weight;
+        const existingAssignedItem = await tx.warehouseInventoryItem.findFirst({
+          where: {
+            id: { not: inventoryItemId },
+            shipmentId: data.shipmentId,
+            purchaseOrderId: inventoryItem.purchaseOrderId,
+            productId: inventoryItem.productId,
+            status: "IN_WAREHOUSE",
+            weight: assignedWeight,
+          },
+          select: { id: true, quantity: true },
+        });
+
+        if (existingAssignedItem) {
+          await tx.warehouseInventoryItem.update({
+            where: { id: existingAssignedItem.id },
+            data: { quantity: existingAssignedItem.quantity + assignQuantity },
+          });
+
+          if (assignQuantity === inventoryItem.quantity) {
+            await tx.warehouseInventoryItem.delete({ where: { id: inventoryItemId } });
+          } else {
+            await tx.warehouseInventoryItem.update({
+              where: { id: inventoryItemId },
+              data: { quantity: inventoryItem.quantity - assignQuantity },
+            });
+          }
+          return;
+        }
+
+        if (assignQuantity === inventoryItem.quantity || inventoryItem.shipmentId) {
+          await tx.warehouseInventoryItem.update({
+            where: { id: inventoryItemId },
+            data: {
+              shipmentId: data.shipmentId,
+              ...(data.weight !== undefined ? { weight: data.weight } : {}),
+            },
+          });
+          return;
+        }
+
+        await tx.warehouseInventoryItem.update({
+          where: { id: inventoryItemId },
+          data: { quantity: inventoryItem.quantity - assignQuantity },
+        });
+
+        await tx.warehouseInventoryItem.create({
+          data: {
+            purchaseOrderId: inventoryItem.purchaseOrderId,
+            productId: inventoryItem.productId,
+            productName: inventoryItem.productName,
+            quantity: assignQuantity,
+            weight: assignedWeight,
+            status: inventoryItem.status,
+            shipmentId: data.shipmentId,
+          },
+        });
+      });
+
+      revalidatePath("/admin/warehouse");
+      revalidatePath("/admin/warehouse/inventory");
+      revalidatePath(`/admin/shipments/${data.shipmentId}`);
+      revalidatePath(`/admin/purchase-orders/${inventoryItem.purchaseOrderId}`);
+      return { success: true, data: { success: true } };
+    }
+
+    const existingItem = await prisma.warehouseInventoryItem.findUnique({
+      where: { id: inventoryItemId },
+      select: {
+        id: true,
+        shipmentId: true,
+        purchaseOrderId: true,
+        productId: true,
+        quantity: true,
+        weight: true,
+        status: true,
+      },
+    });
+    if (!existingItem) return { success: false, error: "Inventory item not found" };
+
     const updateData: Record<string, unknown> = {};
     if (data.shipmentId !== undefined) updateData.shipmentId = data.shipmentId;
     if (data.weight !== undefined) updateData.weight = data.weight;
 
-    await prisma.warehouseInventoryItem.update({
-      where: { id: inventoryItemId },
-      data: updateData,
-    });
+    if (data.shipmentId === null && existingItem.shipmentId) {
+      await prisma.$transaction(async (tx) => {
+        const matchingWarehouseItem = await tx.warehouseInventoryItem.findFirst({
+          where: {
+            id: { not: inventoryItemId },
+            shipmentId: null,
+            purchaseOrderId: existingItem.purchaseOrderId,
+            productId: existingItem.productId,
+            status: existingItem.status,
+            weight: data.weight !== undefined ? data.weight : existingItem.weight,
+          },
+          select: { id: true, quantity: true },
+        });
 
+        if (matchingWarehouseItem) {
+          await tx.warehouseInventoryItem.update({
+            where: { id: matchingWarehouseItem.id },
+            data: { quantity: matchingWarehouseItem.quantity + existingItem.quantity },
+          });
+          await tx.warehouseInventoryItem.delete({ where: { id: inventoryItemId } });
+          return;
+        }
+
+        await tx.warehouseInventoryItem.update({
+          where: { id: inventoryItemId },
+          data: updateData,
+        });
+      });
+    } else {
+      await prisma.warehouseInventoryItem.update({
+        where: { id: inventoryItemId },
+        data: updateData,
+      });
+    }
+
+    revalidatePath("/admin/warehouse");
     revalidatePath("/admin/warehouse/inventory");
+    if (existingItem.shipmentId) revalidatePath(`/admin/shipments/${existingItem.shipmentId}`);
+    revalidatePath(`/admin/purchase-orders/${existingItem.purchaseOrderId}`);
     return { success: true, data: { success: true } };
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Failed to update inventory item";

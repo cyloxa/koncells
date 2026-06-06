@@ -52,7 +52,6 @@ interface PreOrderItem {
       id: string;
       poNumber: number;
       supplierName: string | null;
-      status: string;
     };
   };
 }
@@ -175,7 +174,7 @@ export function PreOrdersClient({ initialPreOrders }: PreOrdersClientProps) {
                 <th className="text-left py-3 px-4 font-medium text-gray-600">Customer</th>
                 <th className="text-center py-3 px-4 font-medium text-gray-600">Qty</th>
                 <th className="text-left py-3 px-4 font-medium text-gray-600">Order Status</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-600">PO Status</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-600">Purchase Order</th>
                 <th className="text-center py-3 px-4 font-medium text-gray-600">Received</th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">Date</th>
               </tr>
@@ -240,25 +239,17 @@ export function PreOrdersClient({ initialPreOrders }: PreOrdersClientProps) {
                     </span>
                   </td>
                   <td className="py-3 px-4">
-                    {po.purchaseOrderItem.purchaseOrder ? (
-                      <Link
-                        href={`/admin/purchase-orders/${po.purchaseOrderItem.purchaseOrder.id}`}
-                        className="text-xs text-brand hover:text-brand/80"
-                      >
-                        PO-{String(po.purchaseOrderItem.purchaseOrder.poNumber).padStart(4, "0")}
-                      </Link>
-                    ) : (
-                      <span className="text-xs text-gray-400">Not linked</span>
-                    )}
+                    <Link
+                      href={`/admin/purchase-orders/${po.purchaseOrderItem.purchaseOrder.id}`}
+                      className="text-xs text-brand hover:text-brand/80"
+                    >
+                      PO-{String(po.purchaseOrderItem.purchaseOrder.poNumber).padStart(4, "0")}
+                    </Link>
                   </td>
                   <td className="py-3 px-4 text-center">
-                    {po.purchaseOrderItem.purchaseOrder ? (
-                      <span className="text-xs text-gray-600">
-                        {po.purchaseOrderItem.quantityReceived}/{po.purchaseOrderItem.quantity}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-gray-400">-</span>
-                    )}
+                    <span className="text-xs text-gray-600">
+                      {po.purchaseOrderItem.quantityReceived}/{po.purchaseOrderItem.quantity}
+                    </span>
                   </td>
                   <td className="py-3 px-4 text-right text-gray-500 whitespace-nowrap">
                     {new Date(po.createdAt).toLocaleDateString("en-US", {

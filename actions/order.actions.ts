@@ -21,7 +21,7 @@ export async function createCheckoutSession(addressId: string) {
       items: {
         include: {
           product: {
-            select: { id: true, name: true, slug: true, price: true, globalPrice: true, images: true, stock: true, reservedStock: true, sku: true },
+            select: { id: true, name: true, slug: true, price: true, globalPrice: true, images: true, stock: true, reservedStock: true, sku: true, shippingCost: true, handlerCost: true },
           },
         },
       },
@@ -77,6 +77,8 @@ export async function createCheckoutSession(addressId: string) {
           quantity: item.quantity,
           price: item.product.price,
           productId: item.product.id,
+          shippingCost: item.product.shippingCost ?? null,
+          handlerCost: item.product.handlerCost ?? null,
         })),
       },
     },
@@ -179,7 +181,7 @@ export async function getAdminOrders() {
       user: { select: { name: true, email: true } },
       items: {
         include: {
-          product: { select: { name: true, shippingCost: true, handlerCost: true } },
+          product: { select: { name: true } },
         },
       },
     },
@@ -212,17 +214,19 @@ export async function getAdminOrders() {
 
     let totalCosts = 0;
     let totalProfit = 0;
+    let itemCount = 0;
     for (const item of order.items) {
       const qty = item.quantity;
       const price = Number(item.price);
       const baseCost = item.costs ? Number(item.costs) : 0;
-      const shipping = Number(item.product.shippingCost ?? 0);
-      const handler = Number(item.product.handlerCost ?? 0);
+      const shipping = Number(item.shippingCost ?? 0);
+      const handler = Number(item.handlerCost ?? 0);
       const discount = item.discount ? Number(item.discount) : 0;
       const itemCost = (baseCost + shipping + handler) * qty;
       const itemRevenue = price * qty - discount * qty;
       totalCosts += itemCost;
       totalProfit += itemRevenue - itemCost;
+      itemCount += qty;
     }
 
     return {
@@ -236,7 +240,7 @@ export async function getAdminOrders() {
       total: Number(order.total),
       totalCosts,
       totalProfit,
-      itemCount: order.items.length,
+      itemCount,
     };
   });
 }
@@ -292,6 +296,14 @@ export async function createManualOrder(
   try {
     const { customerId, items } = parsed.data;
 
+    // Fetch product S&H costs for snapshotting
+    const productIds = items.map((i) => i.productId);
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, shippingCost: true, handlerCost: true },
+    });
+    const productMap = new Map(products.map((p) => [p.id, p]));
+
     // Calculate order totals
     let subtotal = 0;
     let totalCosts = 0;
@@ -301,6 +313,7 @@ export async function createManualOrder(
       const lineTotal = item.price * item.quantity;
       const lineCosts = item.costs * item.quantity;
       const lineProfit = (item.price - item.costs - item.discount) * item.quantity;
+      const product = productMap.get(item.productId);
 
       subtotal += lineTotal;
       totalCosts += lineCosts;
@@ -314,6 +327,8 @@ export async function createManualOrder(
         profit: lineProfit,
         basePrice: item.costs,
         productId: item.productId,
+        shippingCost: product?.shippingCost ?? null,
+        handlerCost: product?.handlerCost ?? null,
       };
     });
 
@@ -367,8 +382,6 @@ export async function getAdminOrderById(id: string) {
               weight: true,
               images: { orderBy: { position: "asc" }, take: 1 },
               buyingPrice: true,
-              shippingCost: true,
-              handlerCost: true,
               competitorsPrice: true,
               globalPrice: true,
               price: true,
@@ -396,14 +409,14 @@ export async function getAdminOrderById(id: string) {
       costs: item.costs ? Number(item.costs) : null,
       profit: item.profit ? Number(item.profit) : null,
       discount: item.discount ? Number(item.discount) : null,
+      shippingCost: item.shippingCost ? Number(item.shippingCost) : null,
+      handlerCost: item.handlerCost ? Number(item.handlerCost) : null,
       competitorsPrice: item.competitorsPrice ? Number(item.competitorsPrice) : null,
       globalPrice: item.globalPrice ? Number(item.globalPrice) : null,
       basePrice: item.basePrice ? Number(item.basePrice) : null,
       product: {
         ...item.product,
         buyingPrice: item.product.buyingPrice ? Number(item.product.buyingPrice) : null,
-        shippingCost: item.product.shippingCost ? Number(item.product.shippingCost) : null,
-        handlerCost: item.product.handlerCost ? Number(item.product.handlerCost) : null,
         competitorsPrice: item.product.competitorsPrice ? Number(item.product.competitorsPrice) : null,
         globalPrice: item.product.globalPrice ? Number(item.product.globalPrice) : null,
         weight: item.product.weight ? Number(item.product.weight) : null,
@@ -712,9 +725,18 @@ export async function addItemsToOrder(
   try {
     const { orderId, items } = parsed.data;
 
+    // Fetch product S&H costs for snapshotting
+    const productIds = items.map((i) => i.productId);
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, shippingCost: true, handlerCost: true },
+    });
+    const productMap = new Map(products.map((p) => [p.id, p]));
+
     // Create order items
     for (const item of items) {
       const profit = (item.price - item.costs - item.discount) * item.quantity;
+      const product = productMap.get(item.productId);
       await prisma.orderItem.create({
         data: {
           orderId,
@@ -725,6 +747,8 @@ export async function addItemsToOrder(
           discount: item.discount,
           profit,
           basePrice: item.costs,
+          shippingCost: product?.shippingCost ?? null,
+          handlerCost: product?.handlerCost ?? null,
         },
       });
     }
@@ -777,7 +801,7 @@ export async function getPreOrdersForOrder(orderId: string) {
       purchaseOrderItem: {
         include: {
           purchaseOrder: {
-            select: { id: true, poNumber: true, supplierName: true, status: true },
+            select: { id: true, poNumber: true, supplierName: true },
           },
         },
       },
@@ -849,20 +873,14 @@ export async function addOrderItemsToPurchaseOrder(
 
       let resolvedPurchaseOrderId = purchaseOrderId;
 
-      if (purchaseOrderId) {
+      if (purchaseOrderId && purchaseOrderId.length > 0) {
         // ── Add to existing PO ──────────────────────
         const po = await tx.purchaseOrder.findUnique({
           where: { id: purchaseOrderId },
-          select: { exchangeRate: true, status: true },
+          select: { exchangeRate: true },
         });
 
         if (!po) throw new Error("Purchase order not found");
-
-        if (po.status !== "PENDING" && po.status !== "ORDERED") {
-          throw new Error(
-            `Cannot add items to a purchase order with status "${po.status}". Only PENDING or ORDERED purchase orders accept new items.`
-          );
-        }
 
         // Check for duplicate products already on this PO
         const existingProductIds = new Set(
@@ -945,7 +963,6 @@ export async function addOrderItemsToPurchaseOrder(
             totalCny,
             exchangeRate: rate,
             totalLkr: totalCny * rate,
-            status: "PENDING",
             items: {
               create: itemRecords.map((r) => ({
                 productId: r.orderItem.product.id,
@@ -1036,7 +1053,6 @@ export async function getOpenPurchaseOrders(): Promise<
 
   try {
     const pos = await prisma.purchaseOrder.findMany({
-      where: { status: { notIn: ["RECEIVED", "CANCELLED"] } },
       select: { id: true, poNumber: true, supplierName: true, createdAt: true },
       orderBy: { createdAt: "desc" },
     });
@@ -1080,9 +1096,6 @@ export async function getOrderItemStatuses(
                     quantity: true,
                     quantityReceived: true,
                     status: true,
-                    purchaseOrder: {
-                      select: { status: true },
-                    },
                   },
                 },
               },
@@ -1137,7 +1150,6 @@ export async function getOrderItemStatuses(
         purchaseOrderItem: {
           status: string;
           purchaseOrderId: string;
-          purchaseOrder: { status: string };
         };
       }> | undefined;
 
@@ -1158,14 +1170,10 @@ export async function getOrderItemStatuses(
 
         for (const preOrder of preOrderItems) {
           const poItemStatus = preOrder.purchaseOrderItem.status;
-          const poStatus = preOrder.purchaseOrderItem.purchaseOrder.status;
-          const effectiveStatus =
-            poItemStatus === "PENDING" && poStatus === "ORDERED" ? "ORDERED" : poItemStatus;
-
-          const priority = statusPriority[effectiveStatus] ?? -1;
+          const priority = statusPriority[poItemStatus] ?? -1;
           if (priority > bestPriority) {
             bestPriority = priority;
-            bestStatus = effectiveStatus;
+            bestStatus = poItemStatus;
             bestPoId = preOrder.purchaseOrderItem.purchaseOrderId;
           }
         }

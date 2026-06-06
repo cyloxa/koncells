@@ -368,9 +368,10 @@ export default function AdminProductsTable({ initialProducts, usdToLkr, cnyToLkr
                 </th>
                 <th className="text-left py-3 px-3 font-medium text-gray-600">Product</th>
                 <th className="text-right py-3 px-3 font-medium text-gray-600">Selling Price</th>
-                <th className="text-right py-3 px-3 font-medium text-gray-600">Buying Price</th>
-                <th className="text-right py-3 px-3 font-medium text-gray-600">Global Price</th>
+                <th className="text-right py-3 px-3 font-medium text-gray-600">Buying (LKR)</th>
+                <th className="text-right py-3 px-3 font-medium text-gray-600">Global (LKR)</th>
                 <th className="text-right py-3 px-3 font-medium text-gray-600">Competitor</th>
+                <th className="text-right py-3 px-3 font-medium text-gray-600">Stock</th>
                 <th className="text-right py-3 px-3 font-medium text-gray-600">Profit</th>
                 <th className="text-right py-3 px-3 font-medium text-gray-600">Costs</th>
                 <th className="text-right py-3 px-3 font-medium text-gray-600">Actions</th>
@@ -494,6 +495,12 @@ export default function AdminProductsTable({ initialProducts, usdToLkr, cnyToLkr
                       />
                     </td>
 
+                    <td className="py-3 px-3 text-right w-[80px]">
+                      <span className={`font-medium ${product.stock <= 0 ? "text-red-600" : product.stock <= 5 ? "text-amber-600" : "text-gray-900"}`}>
+                        {product.stock}
+                      </span>
+                    </td>
+
                     <td className="py-3 px-3 text-right w-[130px]">
                       <span className={`font-medium ${p >= 0 ? "text-green-600" : "text-red-600"}`}>
                         {fmtCurrency(p)}
@@ -533,7 +540,7 @@ export default function AdminProductsTable({ initialProducts, usdToLkr, cnyToLkr
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-500">
+                  <td colSpan={10} className="py-12 text-center text-gray-500">
                     {search ? "No products match your search." : "No products yet. Create your first product to get started."}
                   </td>
                 </tr>

@@ -176,14 +176,10 @@ export interface PurchaseOrderWithRelations {
   id: string;
   poNumber: number;
   supplierName: string | null;
-  supplierContact: string | null;
-  status: string;
   totalCny: number;
   exchangeRate: number;
   totalLkr: number;
   notes: string | null;
-  orderedAt: Date | null;
-  receivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   items: PurchaseOrderItemWithRelations[];
@@ -251,7 +247,6 @@ export interface PreOrderItemWithRelations {
       id: string;
       poNumber: number;
       supplierName: string;
-      status: string;
     };
   };
 }
@@ -259,24 +254,16 @@ export interface PreOrderItemWithRelations {
 export interface WarehouseShipmentWithRelations {
   id: string;
   shipmentNumber: number;
-  purchaseOrderId: string;
   status: string;
   totalWeight: number | null;
-  baseShippingCost: number | null;
+  shippingRatePerKg: number | null;
   extraCost: number | null;
   totalShippingCost: number | null;
   notes: string | null;
-  packedAt: Date | null;
   shippedAt: Date | null;
   deliveredAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  purchaseOrder: {
-    id: string;
-    poNumber: number;
-    supplierName: string;
-    status: string;
-  };
   packages: WarehousePackageWithItems[];
 }
 

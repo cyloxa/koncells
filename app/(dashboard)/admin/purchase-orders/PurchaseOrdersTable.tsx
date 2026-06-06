@@ -10,7 +10,6 @@ export interface PurchaseOrderRow {
   id: string;
   poNumber: number;
   supplierName: string | null;
-  status: string;
   totalCny: number;
   totalLkr: number;
   createdAt: Date;
@@ -20,24 +19,6 @@ export interface PurchaseOrderRow {
 interface PurchaseOrdersTableProps {
   initialOrders: PurchaseOrderRow[];
 }
-
-const statusColors: Record<string, string> = {
-  PENDING: "bg-yellow-100 text-yellow-800",
-  ORDERED: "bg-blue-100 text-blue-800",
-  SHIPPED: "bg-purple-100 text-purple-800",
-  PARTIAL: "bg-orange-100 text-orange-800",
-  RECEIVED: "bg-green-100 text-green-800",
-  CANCELLED: "bg-red-100 text-red-800",
-};
-
-const statusLabels: Record<string, string> = {
-  PENDING: "Pending",
-  ORDERED: "Ordered",
-  SHIPPED: "Shipped",
-  PARTIAL: "Partial",
-  RECEIVED: "Received",
-  CANCELLED: "Cancelled",
-};
 
 export function PurchaseOrdersTable({ initialOrders }: PurchaseOrdersTableProps) {
   const router = useRouter();
@@ -152,7 +133,6 @@ export function PurchaseOrdersTable({ initialOrders }: PurchaseOrdersTableProps)
                   />
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-600">Order Name</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-600">Status</th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">Total Amount</th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">Total (LKR)</th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">Total Items</th>
@@ -186,15 +166,6 @@ export function PurchaseOrdersTable({ initialOrders }: PurchaseOrdersTableProps)
                       </span>
                     )}
                   </td>
-                  <td className="py-3 px-4">
-                    <span
-                      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                        statusColors[order.status] ?? "bg-gray-100 text-gray-700"
-                      }`}
-                    >
-                      {statusLabels[order.status] ?? order.status}
-                    </span>
-                  </td>
                   <td className="py-3 px-4 text-right font-medium text-gray-900">
                     {fmtCny(order.totalCny)}
                   </td>
@@ -211,7 +182,7 @@ export function PurchaseOrdersTable({ initialOrders }: PurchaseOrdersTableProps)
               ))}
               {orders.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-gray-500">
+                  <td colSpan={6} className="py-12 text-center text-gray-500">
                     No purchase orders yet. Create your first purchase order to get started.
                   </td>
                 </tr>

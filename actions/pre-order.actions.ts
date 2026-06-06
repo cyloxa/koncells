@@ -29,7 +29,7 @@ export async function getPreOrders() {
       purchaseOrderItem: {
         include: {
           purchaseOrder: {
-            select: { id: true, poNumber: true, supplierName: true, status: true },
+            select: { id: true, poNumber: true, supplierName: true },
           },
         },
       },
@@ -186,7 +186,6 @@ export async function createPurchaseOrderFromPreOrders(
         totalCny,
         exchangeRate: rate,
         totalLkr,
-        status: "PENDING",
         items: { create: itemsData },
       },
     });
