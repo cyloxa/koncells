@@ -21,7 +21,7 @@ export async function createCheckoutSession(addressId: string) {
       items: {
         include: {
           product: {
-            select: { id: true, name: true, slug: true, price: true, images: true, stock: true },
+            select: { id: true, name: true, slug: true, price: true, globalPrice: true, images: true, stock: true, reservedStock: true, sku: true },
           },
         },
       },
@@ -30,17 +30,25 @@ export async function createCheckoutSession(addressId: string) {
 
   if (!cart || cart.items.length === 0) throw new Error("Cart is empty");
 
-  // Validate stock
-  for (const item of cart.items) {
-    if (item.quantity > item.product.stock) {
-      throw new Error(`Insufficient stock for ${item.product.name}`);
-    }
-  }
+  // Separate in-stock and out-of-stock items (available = stock - reservedStock)
+  const inStockItems = cart.items.filter((item) => item.quantity <= (item.product.stock - item.product.reservedStock));
+  const preOrderItems = cart.items.filter((item) => item.quantity > (item.product.stock - item.product.reservedStock));
 
-  const subtotal = cart.items.reduce((sum: number, i: { product: { price: any; }; quantity: number; }) => sum + Number(i.product.price) * i.quantity, 0);
+  const hasPreOrder = preOrderItems.length > 0;
+
+  // Calculate subtotal (only charge for in-stock items + pre-order items at full price)
+  // For pre-order items, we still charge the customer (pre-order payment)
+  const subtotal = cart.items.reduce(
+    (sum: number, i: { product: { price: any }; quantity: number }) =>
+      sum + Number(i.product.price) * i.quantity,
+    0
+  );
   const shippingCost = subtotal > 100 ? 0 : 9.99;
   const tax = subtotal * 0.08;
   const total = subtotal + shippingCost + tax;
+
+  // Determine order status
+  const orderStatus: string = hasPreOrder ? "PREORDER" : "PENDING";
 
   // Create Stripe payment intent
   const paymentIntent = await getStripe().paymentIntents.create({
@@ -49,14 +57,15 @@ export async function createCheckoutSession(addressId: string) {
     metadata: {
       userId: session.user.id,
       cartId: cart.id,
+      hasPreOrder: hasPreOrder ? "true" : "false",
     },
   });
 
-  // Create order
+  // Create order with items
   const order = await prisma.order.create({
     data: {
       userId: session.user.id,
-      status: "PENDING",
+      status: orderStatus as any,
       subtotal,
       shippingCost,
       tax,
@@ -71,7 +80,21 @@ export async function createCheckoutSession(addressId: string) {
         })),
       },
     },
+    include: {
+      items: true,
+    },
   });
+
+  // Decrement stock and increment reservedStock for in-stock items
+  for (const item of inStockItems) {
+    await prisma.product.update({
+      where: { id: item.product.id },
+      data: {
+        stock: { decrement: item.quantity },
+        reservedStock: { increment: item.quantity },
+      },
+    });
+  }
 
   // Clear cart
   await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
@@ -82,6 +105,7 @@ export async function createCheckoutSession(addressId: string) {
   return {
     orderId: order.id,
     clientSecret: paymentIntent.client_secret,
+    hasPreOrder,
   };
 }
 
@@ -690,6 +714,260 @@ export async function deleteOrders(
     return { success: true, data: { count: ids.length } };
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Failed to delete orders";
+    return { success: false, error: message };
+  }
+}
+
+// ─── Pre-Order helpers ──────────────────────────────
+
+export async function getPreOrdersForOrder(orderId: string) {
+  const session = await auth();
+  if (session?.user?.role !== "ADMIN") return [];
+
+  const preOrders = await prisma.preOrderItem.findMany({
+    where: { orderItem: { orderId } },
+    include: {
+      purchaseOrderItem: {
+        include: {
+          purchaseOrder: {
+            select: { id: true, poNumber: true, supplierName: true, status: true },
+          },
+        },
+      },
+    },
+  });
+
+  return preOrders.map((po) => ({
+    id: po.id,
+    orderItemId: po.orderItemId,
+    quantity: po.quantity,
+    createdAt: po.createdAt,
+    purchaseOrderItem: {
+      id: po.purchaseOrderItem.id,
+      purchaseOrderId: po.purchaseOrderItem.purchaseOrderId,
+      productId: po.purchaseOrderItem.productId,
+      productName: po.purchaseOrderItem.productName,
+      productSku: po.purchaseOrderItem.productSku,
+      quantity: po.purchaseOrderItem.quantity,
+      unitPriceCny: Number(po.purchaseOrderItem.unitPriceCny),
+      lineTotalCny: Number(po.purchaseOrderItem.lineTotalCny),
+      lineTotalLkr: Number(po.purchaseOrderItem.lineTotalLkr),
+      quantityReceived: po.purchaseOrderItem.quantityReceived,
+      purchaseOrder: po.purchaseOrderItem.purchaseOrder,
+    },
+  }));
+}
+
+// ─── Add Order Items to Purchase Order ──────────────
+
+export async function addOrderItemsToPurchaseOrder(
+  orderItemIds: string[],
+  purchaseOrderId?: string,
+  supplierName?: string
+): Promise<ActionResult<{ purchaseOrderId: string }>> {
+  const session = await auth();
+  if (session?.user?.role !== "ADMIN") return { success: false, error: "Unauthorized" };
+
+  if (orderItemIds.length === 0) return { success: false, error: "No order items selected" };
+
+  try {
+    // Fetch all order items with product info
+    const orderItems = await prisma.orderItem.findMany({
+      where: { id: { in: orderItemIds } },
+      include: {
+        product: {
+          select: { id: true, name: true, sku: true, globalPrice: true },
+        },
+        order: {
+          select: { id: true, status: true },
+        },
+      },
+    });
+
+    if (orderItems.length === 0) return { success: false, error: "No order items found" };
+
+    // Get the default exchange rate (CNY to LKR)
+    const exchangeRate = await prisma.exchangeRate.findFirst({
+      where: { source: "CNY", target: "LKR", isDefault: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!exchangeRate) return { success: false, error: "No CNY to LKR exchange rate configured" };
+
+    const rate = Number(exchangeRate.rate);
+
+    // Collect unique order IDs for status update
+    const orderIds = [...new Set(orderItems.map((oi) => oi.order.id))];
+
+    if (purchaseOrderId) {
+      // ── Add to existing PO ──────────────────────
+      const po = await prisma.purchaseOrder.findUnique({
+        where: { id: purchaseOrderId },
+        select: { exchangeRate: true },
+      });
+
+      if (!po) return { success: false, error: "Purchase order not found" };
+
+      for (const orderItem of orderItems) {
+        const unitPriceCny = orderItem.product.globalPrice ? Number(orderItem.product.globalPrice) : 0;
+        const lineCny = unitPriceCny * orderItem.quantity;
+        const lineLkr = lineCny * rate;
+
+        // Create PurchaseOrderItem
+        const poItem = await prisma.purchaseOrderItem.create({
+          data: {
+            purchaseOrderId,
+            productId: orderItem.product.id,
+            productName: orderItem.product.name,
+            productSku: orderItem.product.sku,
+            quantity: orderItem.quantity,
+            unitPriceCny,
+            lineTotalCny: lineCny,
+            lineTotalLkr: lineLkr,
+          },
+        });
+
+        // Create PreOrderItem link
+        await prisma.preOrderItem.create({
+          data: {
+            orderItemId: orderItem.id,
+            purchaseOrderItemId: poItem.id,
+            quantity: orderItem.quantity,
+          },
+        });
+      }
+
+      // Recalculate PO totals
+      const allItems = await prisma.purchaseOrderItem.findMany({
+        where: { purchaseOrderId },
+      });
+
+      const totalCny = allItems.reduce((sum, i) => sum + Number(i.lineTotalCny), 0);
+      const totalLkr = allItems.reduce((sum, i) => sum + Number(i.lineTotalLkr), 0);
+
+      await prisma.purchaseOrder.update({
+        where: { id: purchaseOrderId },
+        data: { totalCny, totalLkr },
+      });
+    } else {
+      // ── Create new PO ───────────────────────────
+      const poSupplierName = supplierName || "Ad-hoc Supplier";
+
+      // Build items data for the new PO
+      let totalCny = 0;
+      const itemRecords: Array<{
+        orderItem: (typeof orderItems)[number];
+        unitPriceCny: number;
+        lineCny: number;
+        lineLkr: number;
+      }> = [];
+
+      for (const orderItem of orderItems) {
+        const unitPriceCny = orderItem.product.globalPrice ? Number(orderItem.product.globalPrice) : 0;
+        const lineCny = unitPriceCny * orderItem.quantity;
+        const lineLkr = lineCny * rate;
+        totalCny += lineCny;
+        itemRecords.push({ orderItem, unitPriceCny, lineCny, lineLkr });
+      }
+
+      const po = await prisma.purchaseOrder.create({
+        data: {
+          supplierName: poSupplierName,
+          totalCny,
+          exchangeRate: rate,
+          totalLkr: totalCny * rate,
+          status: "PENDING",
+          items: {
+            create: itemRecords.map((r) => ({
+              productId: r.orderItem.product.id,
+              productName: r.orderItem.product.name,
+              productSku: r.orderItem.product.sku,
+              quantity: r.orderItem.quantity,
+              unitPriceCny: r.unitPriceCny,
+              lineTotalCny: r.lineCny,
+              lineTotalLkr: r.lineLkr,
+            })),
+          },
+        },
+      });
+
+      // Create PreOrderItem links for the newly created PO items
+      const poItems = await prisma.purchaseOrderItem.findMany({
+        where: { purchaseOrderId: po.id },
+      });
+
+      for (const poItem of poItems) {
+        const matching = itemRecords.find(
+          (r) => r.orderItem.product.id === poItem.productId && r.unitPriceCny === Number(poItem.unitPriceCny)
+        );
+        if (matching) {
+          await prisma.preOrderItem.create({
+            data: {
+              orderItemId: matching.orderItem.id,
+              purchaseOrderItemId: poItem.id,
+              quantity: matching.orderItem.quantity,
+            },
+          });
+        }
+      }
+
+      purchaseOrderId = po.id;
+    }
+
+    // Update order status to AWAITING_STOCK for eligible orders
+    const eligibleStatuses: string[] = ["PENDING", "PROCESSING"];
+    for (const orderId of orderIds) {
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        select: { status: true },
+      });
+      if (order && eligibleStatuses.includes(order.status)) {
+        await prisma.order.update({
+          where: { id: orderId },
+          data: { status: "AWAITING_STOCK" },
+        });
+      }
+    }
+
+    revalidatePath("/admin/purchase-orders");
+    if (purchaseOrderId) revalidatePath(`/admin/purchase-orders/${purchaseOrderId}`);
+    revalidatePath("/admin/orders");
+    for (const orderId of orderIds) {
+      revalidatePath(`/admin/orders/${orderId}`);
+    }
+
+    return { success: true, data: { purchaseOrderId } };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "Failed to add items to purchase order";
+    return { success: false, error: message };
+  }
+}
+
+// ─── Get Open Purchase Orders (for dropdown selector) ──
+
+export async function getOpenPurchaseOrders(): Promise<
+  ActionResult<
+    Array<{
+      id: string;
+      poNumber: number;
+      supplierName: string | null;
+      createdAt: Date;
+    }>
+  >
+> {
+  const session = await auth();
+  if (session?.user?.role !== "ADMIN") return { success: false, error: "Unauthorized" };
+
+  try {
+    const pos = await prisma.purchaseOrder.findMany({
+      where: { status: { notIn: ["RECEIVED", "CANCELLED"] } },
+      select: { id: true, poNumber: true, supplierName: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return { success: true, data: pos };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "Failed to fetch purchase orders";
     return { success: false, error: message };
   }
 }

@@ -32,6 +32,9 @@ import type { DefaultRates } from "@/actions/exchange.actions";
 interface CategoryOption {
   id: string;
   name: string;
+  parentId: string | null;
+  parent: { name: string } | null;
+  _count: { children: number };
 }
 
 interface ProductOption {
@@ -949,10 +952,12 @@ export function ProductForm({
           <div className="space-y-2">
             <Label required>Category</Label>
             <SearchableSelect
-              options={categories.map((c) => ({
-                value: c.id,
-                label: c.name,
-              }))}
+              options={categories
+                .filter((c) => c._count.children === 0) // Only leaf categories
+                .map((c) => ({
+                  value: c.id,
+                  label: c.parent ? `${c.parent.name} > ${c.name}` : c.name,
+                }))}
               value={categoryId}
               onChange={(val) => setCategoryId(val)}
               placeholder="Select category..."

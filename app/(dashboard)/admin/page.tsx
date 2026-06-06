@@ -11,7 +11,23 @@ import {
   TrendingUp,
   TrendingDown,
   ArrowUpRight,
+  ClipboardList,
+  Warehouse,
+  Clock,
+  AlertTriangle,
 } from "lucide-react";
+
+import { getPreOrdersCount } from "@/actions/pre-order.actions";
+
+const statusColors: Record<string, string> = {
+  PENDING: "bg-yellow-100 text-yellow-700",
+  PROCESSING: "bg-blue-100 text-blue-700",
+  SHIPPED: "bg-purple-100 text-purple-700",
+  DELIVERED: "bg-green-100 text-green-700",
+  CANCELLED: "bg-red-100 text-red-700",
+  PREORDER: "bg-indigo-100 text-indigo-700",
+  AWAITING_STOCK: "bg-orange-100 text-orange-700",
+};
 
 export default async function AdminPage() {
   const session = await auth();
@@ -30,8 +46,10 @@ export default async function AdminPage() {
     topProducts,
     ordersByStatus,
     activeProducts,
-    lowStockProducts,
+    lowStockProductsDetailed,
     totalReviews,
+    pendingPreOrders,
+    openPurchaseOrders,
   ] = await Promise.all([
     prisma.product.count(),
     prisma.order.count(),
@@ -70,9 +88,34 @@ export default async function AdminPage() {
       _sum: { total: true },
     }),
     prisma.product.count({ where: { isActive: true } }),
-    prisma.product.count({ where: { stock: { lte: 5 }, isActive: true } }),
+    prisma.product.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        stock: true,
+        reservedStock: true,
+        lowStockThreshold: true,
+        images: { take: 1, orderBy: { position: "asc" }, select: { url: true } },
+      },
+      orderBy: { name: "asc" },
+    }),
     prisma.review.count(),
+    getPreOrdersCount(),
+    prisma.purchaseOrder.count({
+      where: { status: { in: ["PENDING", "ORDERED", "SHIPPED", "PARTIAL"] } },
+    }),
   ]);
+
+  const lowStockItems = lowStockProductsDetailed
+    .map((p) => ({
+      ...p,
+      available: p.stock - p.reservedStock,
+      threshold: p.lowStockThreshold ?? 10,
+    }))
+    .filter((p) => p.available <= p.threshold)
+    .slice(0, 10);
 
   const totalRevenue = await prisma.order.aggregate({
     _sum: { total: true },
@@ -111,7 +154,7 @@ export default async function AdminPage() {
     {
       label: "Total Products",
       value: totalProducts,
-      sub: `${activeProducts} active, ${lowStockProducts} low stock`,
+      sub: `${activeProducts} active`,
       icon: Package,
       color: "text-blue-600",
       bg: "bg-blue-100",
@@ -179,6 +222,49 @@ export default async function AdminPage() {
         ))}
       </div>
 
+      {/* Supplier & Warehouse Quick Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <Link href="/admin/pre-orders" className="block">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-indigo-100">
+                <Clock className="h-5 w-5 text-indigo-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Pending Pre-Orders</p>
+                <p className="text-xl font-bold text-gray-900">{pendingPreOrders}</p>
+              </div>
+            </div>
+          </div>
+        </Link>
+        <Link href="/admin/purchase-orders" className="block">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-blue-100">
+                <ClipboardList className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Open Purchase Orders</p>
+                <p className="text-xl font-bold text-gray-900">{openPurchaseOrders}</p>
+              </div>
+            </div>
+          </div>
+        </Link>
+        <Link href="/admin/warehouse" className="block">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-amber-100">
+                <Warehouse className="h-5 w-5 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Warehouse</p>
+                <p className="text-xl font-bold text-gray-900">Manage</p>
+              </div>
+            </div>
+          </div>
+        </Link>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         {/* Orders by Status */}
         <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -188,17 +274,19 @@ export default async function AdminPage() {
               <p className="text-sm text-gray-500">No orders yet.</p>
             ) : (
               ordersByStatus.map((status) => {
-                const statusColors: Record<string, string> = {
+                const sColors: Record<string, string> = {
                   PENDING: "bg-yellow-100 text-yellow-700 border-yellow-200",
                   PROCESSING: "bg-blue-100 text-blue-700 border-blue-200",
                   SHIPPED: "bg-purple-100 text-purple-700 border-purple-200",
                   DELIVERED: "bg-green-100 text-green-700 border-green-200",
                   CANCELLED: "bg-red-100 text-red-700 border-red-200",
+                  PREORDER: "bg-indigo-100 text-indigo-700 border-indigo-200",
+                  AWAITING_STOCK: "bg-orange-100 text-orange-700 border-orange-200",
                 };
                 return (
                   <div
                     key={status.status}
-                    className={`flex items-center justify-between p-3 rounded-lg border ${statusColors[status.status] ?? "bg-gray-100 text-gray-700 border-gray-200"}`}
+                    className={`flex items-center justify-between p-3 rounded-lg border ${sColors[status.status] ?? "bg-gray-100 text-gray-700 border-gray-200"}`}
                   >
                     <span className="text-sm font-medium">{status.status}</span>
                     <div className="flex items-center gap-3">
@@ -318,6 +406,89 @@ export default async function AdminPage() {
         </div>
       </div>
 
+      {/* Low Stock & Auto-Restock */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-8">
+        <div className="flex items-center gap-2 mb-4">
+          <AlertTriangle className="h-5 w-5 text-amber-600" />
+          <h2 className="text-lg font-semibold text-gray-900">Low Stock Products</h2>
+          {lowStockItems.length > 0 && (
+            <span className="ml-auto inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+              {lowStockItems.length} products
+            </span>
+          )}
+        </div>
+        {lowStockItems.length === 0 ? (
+          <p className="text-sm text-gray-500">All products are well-stocked.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-2.5 px-3 font-medium text-gray-600">Product</th>
+                  <th className="text-left py-2.5 px-3 font-medium text-gray-600">SKU</th>
+                  <th className="text-right py-2.5 px-3 font-medium text-gray-600">Stock</th>
+                  <th className="text-right py-2.5 px-3 font-medium text-gray-600">Reserved</th>
+                  <th className="text-right py-2.5 px-3 font-medium text-gray-600">Available</th>
+                  <th className="text-right py-2.5 px-3 font-medium text-gray-600">Threshold</th>
+                  <th className="text-right py-2.5 px-3 font-medium text-gray-600">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lowStockItems.map((product) => (
+                  <tr
+                    key={product.id}
+                    className="border-b border-gray-100 hover:bg-gray-50"
+                  >
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center gap-2">
+                        {product.images[0] ? (
+                          <img
+                            src={product.images[0].url}
+                            alt={product.name}
+                            className="h-7 w-7 rounded object-cover"
+                          />
+                        ) : (
+                          <div className="h-7 w-7 rounded bg-gray-200" />
+                        )}
+                        <span className="font-medium text-gray-900 truncate max-w-[180px]">
+                          {product.name}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3 font-mono text-xs text-gray-600">
+                      {product.sku}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-medium text-gray-900">
+                      {product.stock}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-medium text-orange-600">
+                      {product.reservedStock}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-medium text-red-600">
+                      {product.available}
+                    </td>
+                    <td className="py-2.5 px-3 text-right text-gray-500">
+                      {product.threshold}
+                    </td>
+                    <td className="py-2.5 px-3 text-right">
+                      <Link
+                        href={{
+                          pathname: "/admin/purchase-orders/create",
+                          query: { productId: product.id },
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-brand text-white hover:bg-brand-dark transition-colors"
+                      >
+                        Create Purchase Order
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Recent Orders Table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="flex items-center justify-between p-6 pb-4">
@@ -347,12 +518,14 @@ export default async function AdminPage() {
               </thead>
               <tbody>
                 {recentOrders.map((order) => {
-                  const statusColors: Record<string, string> = {
+                  const sColors: Record<string, string> = {
                     PENDING: "bg-yellow-100 text-yellow-700",
                     PROCESSING: "bg-blue-100 text-blue-700",
                     SHIPPED: "bg-purple-100 text-purple-700",
                     DELIVERED: "bg-green-100 text-green-700",
                     CANCELLED: "bg-red-100 text-red-700",
+                    PREORDER: "bg-indigo-100 text-indigo-700",
+                    AWAITING_STOCK: "bg-orange-100 text-orange-700",
                   };
                   const itemCount = order.items.reduce(
                     (sum, item) => sum + item.quantity,
@@ -380,7 +553,7 @@ export default async function AdminPage() {
                       <td className="py-3 px-4">
                         <span
                           className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                            statusColors[order.status] ?? "bg-gray-100 text-gray-700"
+                            sColors[order.status] ?? "bg-gray-100 text-gray-700"
                           }`}
                         >
                           {order.status}

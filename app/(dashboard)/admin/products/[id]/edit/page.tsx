@@ -31,7 +31,13 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
     }),
     prisma.category.findMany({
       orderBy: { name: "asc" },
-      select: { id: true, name: true },
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        parent: { select: { name: true } },
+        _count: { select: { children: true } },
+      },
     }),
     prisma.product.findMany({
       orderBy: { name: "asc" },

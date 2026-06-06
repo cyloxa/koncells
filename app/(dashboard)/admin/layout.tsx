@@ -9,12 +9,20 @@ import {
   FolderTree,
   BarChart3,
   Settings,
+  ClipboardList,
+  Warehouse,
+  Clock,
+  Truck,
 } from "lucide-react";
 
 const adminLinks = [
   { href: "/admin", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" /> },
   { href: "/admin/products", label: "Products", icon: <Package className="h-4 w-4" /> },
   { href: "/admin/orders", label: "Orders", icon: <ShoppingCart className="h-4 w-4" /> },
+  { href: "/admin/purchase-orders", label: "Purchase Orders", icon: <ClipboardList className="h-4 w-4" /> },
+  { href: "/admin/warehouse", label: "Warehouse", icon: <Warehouse className="h-4 w-4" /> },
+  { href: "/admin/suppliers", label: "Suppliers", icon: <Truck className="h-4 w-4" /> },
+  { href: "/admin/pre-orders", label: "Pre-Orders", icon: <Clock className="h-4 w-4" /> },
   { href: "/admin/customers", label: "Customers", icon: <Users className="h-4 w-4" /> },
   { href: "/admin/categories", label: "Categories", icon: <FolderTree className="h-4 w-4" /> },
   { href: "/admin/settings", label: "Settings", icon: <Settings className="h-4 w-4" /> },

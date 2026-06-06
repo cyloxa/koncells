@@ -14,16 +14,26 @@ import {
   Package,
   LogOut,
   Settings,
+  ChevronDown,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
-export function Navbar() {
+interface NavCategory {
+  id: string;
+  name: string;
+  slug: string;
+  children: { id: string; name: string; slug: string }[];
+}
+
+export function Navbar({ categories }: { categories: NavCategory[] }) {
   const { data: session } = useSession();
   const itemCount = useCartStore((s) => s.items.reduce((sum, i) => sum + i.quantity, 0));
   const openCart = useCartStore((s) => s.openCart);
   const { isMobileMenuOpen, toggleMobileMenu, closeAll } = useUIStore();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const dropdownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -35,11 +45,30 @@ export function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const handleDropdownEnter = (slug: string) => {
+    if (dropdownTimeoutRef.current) {
+      clearTimeout(dropdownTimeoutRef.current);
+      dropdownTimeoutRef.current = null;
+    }
+    setOpenDropdown(slug);
+  };
+
+  const handleDropdownLeave = () => {
+    dropdownTimeoutRef.current = setTimeout(() => {
+      setOpenDropdown(null);
+    }, 150);
+  };
+
   const navLinks = [
     { href: "/products", label: "Shop All" },
-    { href: "/categories/electronics", label: "Electronics" },
-    { href: "/categories/clothing", label: "Clothing" },
-    { href: "/categories/home-living", label: "Home" },
+    ...categories.map((cat) => ({
+      href: `/categories/${cat.slug}`,
+      label: cat.name,
+      children: cat.children.map((child) => ({
+        href: `/categories/${child.slug}`,
+        label: child.name,
+      })),
+    })),
   ];
 
   return (
@@ -54,16 +83,44 @@ export function Navbar() {
             </Link>
 
             {/* Desktop Navigation */}
-            <nav className="hidden md:flex items-center gap-6">
-              {navLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
-                >
-                  {link.label}
-                </Link>
-              ))}
+            <nav className="hidden md:flex items-center gap-1">
+              {navLinks.map((link) => {
+                const hasChildren = "children" in link && link.children && link.children.length > 0;
+                return (
+                  <div
+                    key={link.href}
+                    className="relative"
+                    onMouseEnter={() => hasChildren && handleDropdownEnter((link as any).slug || link.href)}
+                    onMouseLeave={handleDropdownLeave}
+                  >
+                    <Link
+                      href={link.href}
+                      className="flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors"
+                    >
+                      {link.label}
+                      {hasChildren && <ChevronDown className="h-3.5 w-3.5" />}
+                    </Link>
+                    {hasChildren && openDropdown === ((link as any).slug || link.href) && (
+                      <div
+                        className="absolute top-full left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50"
+                        onMouseEnter={() => handleDropdownEnter((link as any).slug || link.href)}
+                        onMouseLeave={handleDropdownLeave}
+                      >
+                        {link.children.map((child: { href: string; label: string }) => (
+                          <Link
+                            key={child.href}
+                            href={child.href}
+                            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                            onClick={() => setOpenDropdown(null)}
+                          >
+                            {child.label}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </nav>
           </div>
 
@@ -187,16 +244,34 @@ export function Navbar() {
               <SearchBar />
             </div>
             <nav className="flex flex-col gap-2">
-              {navLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  onClick={closeAll}
-                  className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg"
-                >
-                  {link.label}
-                </Link>
-              ))}
+              {navLinks.map((link) => {
+                const hasChildren = "children" in link && link.children && link.children.length > 0;
+                return (
+                  <div key={link.href}>
+                    <Link
+                      href={link.href}
+                      onClick={closeAll}
+                      className="block px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg"
+                    >
+                      {link.label}
+                    </Link>
+                    {hasChildren && (
+                      <div className="ml-4 mt-1 space-y-1">
+                        {link.children.map((child: { href: string; label: string }) => (
+                          <Link
+                            key={child.href}
+                            href={child.href}
+                            onClick={closeAll}
+                            className="block px-4 py-1.5 text-sm text-gray-500 hover:text-gray-900 hover:bg-gray-50 rounded-lg"
+                          >
+                            {child.label}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </nav>
           </div>
         )}

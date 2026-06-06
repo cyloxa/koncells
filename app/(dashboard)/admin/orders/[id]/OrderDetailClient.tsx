@@ -13,6 +13,8 @@ import {
   Search,
   X,
   Save,
+  Loader2,
+  ChevronDown,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
@@ -21,6 +23,8 @@ import {
   deleteOrderItems,
   addItemsToOrder,
   updateOrder,
+  getOpenPurchaseOrders,
+  addOrderItemsToPurchaseOrder,
 } from "@/actions/order.actions";
 import { searchProductsForOrder } from "@/actions/product.actions";
 
@@ -90,6 +94,25 @@ interface OrderData {
 
 interface Props {
   order: OrderData;
+  preOrders: Array<{
+    id: string;
+    orderItemId: string;
+    quantity: number;
+    createdAt: Date;
+    purchaseOrderItem: {
+      productName: string;
+      productSku: string;
+      quantity: number;
+      quantityReceived: number;
+      unitPriceCny: number;
+      purchaseOrder: {
+        id: string;
+        poNumber: number;
+        supplierName: string;
+        status: string;
+      };
+    };
+  }>;
 }
 
 const statusColors: Record<string, string> = {
@@ -98,15 +121,22 @@ const statusColors: Record<string, string> = {
   SHIPPED: "bg-purple-100 text-purple-700",
   DELIVERED: "bg-green-100 text-green-700",
   CANCELLED: "bg-red-100 text-red-700",
+  PREORDER: "bg-indigo-100 text-indigo-700",
+  AWAITING_STOCK: "bg-orange-100 text-orange-700",
 };
 
-export function OrderDetailClient({ order }: Props) {
+export function OrderDetailClient({ order, preOrders }: Props) {
   const [copying, setCopying] = useState(false);
   const [status, setStatus] = useState(order.status);
   const [items, setItems] = useState<OrderItemData[]>(order.items);
   const [notes, setNotes] = useState(order.notes ?? "");
   const [savingNotes, setSavingNotes] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
+
+  // Build a set of order item IDs that are pre-orders
+  const preOrderItemIds = new Set(preOrders.map((po) => po.orderItemId));
+
+  const isPreOrderItem = (itemId: string) => preOrderItemIds.has(itemId);
 
   // Bulk delete state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -126,6 +156,16 @@ export function OrderDetailClient({ order }: Props) {
 
   // Hover popup state
   const [hoveredItem, setHoveredItem] = useState<OrderItemData | null>(null);
+
+  // Send to PO state
+  const [sendToPoItemId, setSendToPoItemId] = useState<string | null>(null);
+  const [openPOs, setOpenPOs] = useState<
+    Array<{ id: string; poNumber: number; supplierName: string | null; createdAt: Date }>
+  >([]);
+  const [selectedPOId, setSelectedPOId] = useState<string>("");
+  const [newPOSupplierName, setNewPOSupplierName] = useState<string>("");
+  const [sendMode, setSendMode] = useState<"existing" | "new">("existing");
+  const [isSendingToPO, setIsSendingToPO] = useState(false);
   const [popupPos, setPopupPos] = useState({ top: 0, left: 0 });
 
   const fmtCurrency = (n: number) =>
@@ -259,6 +299,20 @@ export function OrderDetailClient({ order }: Props) {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  // Fetch open POs when Send to PO dialog opens
+  useEffect(() => {
+    if (sendToPoItemId) {
+      getOpenPurchaseOrders().then((result) => {
+        if (result.success && result.data) {
+          setOpenPOs(result.data);
+          if (result.data.length > 0) {
+            setSelectedPOId(result.data[0].id);
+          }
+        }
+      });
+    }
+  }, [sendToPoItemId]);
 
   const handleAddProductToOrder = async (product: ProductSearchResult) => {
     const defaultCost = Number(product.buyingPrice ?? 0);
@@ -685,6 +739,9 @@ export function OrderDetailClient({ order }: Props) {
                   <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider min-w-[100px]">
                     Line Total
                   </th>
+                  <th className="text-center px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider w-[100px]">
+                    Action
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -724,6 +781,11 @@ export function OrderDetailClient({ order }: Props) {
                           <p className="text-xs text-gray-500">
                             Stock: <span className={item.product.stock > 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}>{item.product.stock}</span>
                           </p>
+                          {isPreOrderItem(item.id) && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700 mt-1">
+                              Pre-Order
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -824,6 +886,22 @@ export function OrderDetailClient({ order }: Props) {
                       {/* Line Total = (selling price - discount) × qty */}
                       <td className="px-3 py-3 text-right font-medium text-gray-900">
                         {fmtCurrency(v.lineTotal)}
+                      </td>
+
+                      {/* Send to PO action */}
+                      <td className="px-3 py-3 text-center">
+                        <button
+                          onClick={() => {
+                            setSendToPoItemId(item.id);
+                            setSendMode("existing");
+                            setSelectedPOId("");
+                            setNewPOSupplierName("");
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                        >
+                          <Package className="h-3 w-3" />
+                          Send to PO
+                        </button>
                       </td>
                     </tr>
                   );
@@ -964,6 +1042,168 @@ export function OrderDetailClient({ order }: Props) {
             </div>
           </div>
         )}
+
+        {/* ─── Send to PO Dialog ──────────────────────── */}
+        {sendToPoItemId && (() => {
+          const item = items.find((i) => i.id === sendToPoItemId);
+          if (!item) return null;
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-gray-900">Send to Purchase Order</h2>
+                  <button
+                    onClick={() => setSendToPoItemId(null)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {/* Item details */}
+                <div className="bg-gray-50 rounded-lg p-4 mb-5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">Product</span>
+                    <span className="text-sm font-medium text-gray-900">{item.product.name}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">Quantity</span>
+                    <span className="text-sm font-medium text-gray-900">{item.quantity}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">Supplier Price (CNY)</span>
+                    <span className="text-sm font-medium text-gray-900">
+                      ¥{(item.globalPrice ?? item.product.globalPrice ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Mode toggle */}
+                <div className="flex gap-2 mb-4">
+                  <button
+                    onClick={() => setSendMode("existing")}
+                    className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                      sendMode === "existing"
+                        ? "bg-brand text-white border-brand"
+                        : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    Add to Existing PO
+                  </button>
+                  <button
+                    onClick={() => setSendMode("new")}
+                    className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                      sendMode === "new"
+                        ? "bg-brand text-white border-brand"
+                        : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    Create New PO
+                  </button>
+                </div>
+
+                {/* Existing PO dropdown */}
+                {sendMode === "existing" && (
+                  <div className="mb-5">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Select Purchase Order
+                    </label>
+                    {openPOs.length > 0 ? (
+                      <div className="relative">
+                        <select
+                          value={selectedPOId}
+                          onChange={(e) => setSelectedPOId(e.target.value)}
+                          className="w-full appearance-none rounded-lg border border-gray-300 px-3 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40 focus:border-brand bg-white"
+                        >
+                          {openPOs.map((po) => (
+                            <option key={po.id} value={po.id}>
+                              PO#{po.poNumber} — {po.supplierName ?? "No supplier"} ({new Date(po.createdAt).toLocaleDateString()})
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 italic">No open purchase orders found.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* New PO supplier name */}
+                {sendMode === "new" && (
+                  <div className="mb-5">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Supplier Name
+                    </label>
+                    <input
+                      type="text"
+                      value={newPOSupplierName}
+                      onChange={(e) => setNewPOSupplierName(e.target.value)}
+                      placeholder="Enter supplier name..."
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40 focus:border-brand"
+                    />
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setSendToPoItemId(null)}
+                    disabled={isSendingToPO}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={async () => {
+                      if (sendMode === "existing" && !selectedPOId) {
+                        toast.error("Please select a purchase order");
+                        return;
+                      }
+                      if (sendMode === "new" && !newPOSupplierName.trim()) {
+                        toast.error("Please enter a supplier name");
+                        return;
+                      }
+                      setIsSendingToPO(true);
+                      try {
+                        const result = await addOrderItemsToPurchaseOrder(
+                          [sendToPoItemId],
+                          sendMode === "existing" ? selectedPOId : undefined,
+                          sendMode === "new" ? newPOSupplierName.trim() : undefined
+                        );
+                        if (result.success) {
+                          toast.success("Items added to purchase order");
+                          setSendToPoItemId(null);
+                          window.location.reload();
+                        } else {
+                          toast.error(result.error || "Failed to add to purchase order");
+                        }
+                      } catch {
+                        toast.error("Failed to add to purchase order");
+                      } finally {
+                        setIsSendingToPO(false);
+                      }
+                    }}
+                    disabled={
+                      isSendingToPO ||
+                      (sendMode === "existing" && !selectedPOId) ||
+                      (sendMode === "new" && !newPOSupplierName.trim())
+                    }
+                  >
+                    {isSendingToPO ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      "Confirm"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ─── Notes Section ───────────────────────────── */}
         <div className="bg-white rounded-xl border border-gray-200 p-6">

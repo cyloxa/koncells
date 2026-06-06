@@ -1,15 +1,23 @@
 import Link from "next/link";
 import { Package } from "lucide-react";
 
-export function Footer() {
+interface NavCategory {
+  id: string;
+  name: string;
+  slug: string;
+  children: { id: string; name: string; slug: string }[];
+}
+
+export function Footer({ categories }: { categories: NavCategory[] }) {
   const currentYear = new Date().getFullYear();
 
   const footerLinks = {
     shop: [
       { href: "/products", label: "All Products" },
-      { href: "/categories/electronics", label: "Electronics" },
-      { href: "/categories/clothing", label: "Clothing" },
-      { href: "/categories/home-living", label: "Home & Living" },
+      ...categories.map((cat) => ({
+        href: `/categories/${cat.slug}`,
+        label: cat.name,
+      })),
     ],
     support: [
       { href: "/contact", label: "Contact Us" },

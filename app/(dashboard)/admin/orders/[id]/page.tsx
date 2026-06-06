@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { notFound } from "next/navigation";
-import { getAdminOrderById } from "@/actions/order.actions";
+import { getAdminOrderById, getPreOrdersForOrder } from "@/actions/order.actions";
 import { OrderDetailClient } from "./OrderDetailClient";
 
 interface OrderDetailPageProps {
@@ -13,8 +13,11 @@ export default async function AdminOrderDetailPage({ params }: OrderDetailPagePr
   if (!session?.user || session.user.role !== "ADMIN") redirect("/login");
 
   const { id } = await params;
-  const order = await getAdminOrderById(id);
+  const [order, preOrders] = await Promise.all([
+    getAdminOrderById(id),
+    getPreOrdersForOrder(id),
+  ]);
   if (!order) notFound();
 
-  return <OrderDetailClient order={order as any} />;
+  return <OrderDetailClient order={order as any} preOrders={preOrders as any} />;
 }

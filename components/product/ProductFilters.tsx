@@ -2,11 +2,20 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useCallback } from "react";
-import { SlidersHorizontal, X } from "lucide-react";
+import { SlidersHorizontal, X, ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+interface CategoryFilter {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  parent: { id: string; name: string; slug: string } | null;
+  _count: { products: number; children: number };
+}
+
 interface ProductFiltersProps {
-  categories?: { id: string; name: string; slug: string }[];
+  categories?: CategoryFilter[];
   className?: string;
 }
 
@@ -21,9 +30,16 @@ export function ProductFilters({ categories, className }: ProductFiltersProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isOpen, setIsOpen] = useState(false);
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   const currentCategory = searchParams.get("category") ?? "";
   const currentSort = searchParams.get("sort") ?? "";
+
+  const topLevelCategories = (categories ?? []).filter((c) => !c.parentId);
+  const childCategories = (categories ?? []).filter((c) => c.parentId);
+
+  const getChildren = (parentId: string) =>
+    childCategories.filter((c) => c.parentId === parentId);
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
@@ -44,6 +60,18 @@ export function ProductFilters({ categories, className }: ProductFiltersProps) {
   };
 
   const hasActiveFilters = currentCategory || currentSort;
+
+  const toggleParent = (id: string) => {
+    setExpandedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className={cn("space-y-4", className)}>
@@ -78,7 +106,7 @@ export function ProductFilters({ categories, className }: ProductFiltersProps) {
         {categories && categories.length > 0 && (
           <div>
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Category</h3>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <button
                 onClick={() =>
                   router.push(`/products?${createQueryString("category", "")}`)
@@ -92,24 +120,92 @@ export function ProductFilters({ categories, className }: ProductFiltersProps) {
               >
                 All Categories
               </button>
-              {categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() =>
-                    router.push(
-                      `/products?${createQueryString("category", cat.slug)}`
-                    )
-                  }
-                  className={cn(
-                    "block w-full text-left text-sm px-3 py-1.5 rounded-lg transition-colors",
-                    currentCategory === cat.slug
-                      ? "bg-brand-light text-brand font-medium"
-                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-                  )}
-                >
-                  {cat.name}
-                </button>
-              ))}
+
+              {/* Top-level parents with expand */}
+              {topLevelCategories.map((cat) => {
+                const children = getChildren(cat.id);
+                const isExpanded = expandedParents.has(cat.id);
+
+                return (
+                  <div key={cat.id}>
+                    <div className="flex items-center">
+                      {children.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleParent(cat.id)}
+                          className="p-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
+                        >
+                          {isExpanded ? (
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      ) : (
+                        <span className="w-5.5" />
+                      )}
+                      <button
+                        onClick={() =>
+                          router.push(
+                            `/products?${createQueryString("category", cat.slug)}`
+                          )
+                        }
+                        className={cn(
+                          "flex-1 text-left text-sm px-2 py-1.5 rounded-lg transition-colors",
+                          currentCategory === cat.slug
+                            ? "bg-brand-light text-brand font-medium"
+                            : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                        )}
+                      >
+                        {cat.name}
+                      </button>
+                    </div>
+
+                    {/* Child categories */}
+                    {isExpanded &&
+                      children.map((child) => (
+                        <button
+                          key={child.id}
+                          onClick={() =>
+                            router.push(
+                              `/products?${createQueryString("category", child.slug)}`
+                            )
+                          }
+                          className={cn(
+                            "block w-full text-left text-sm pl-9 pr-3 py-1.5 rounded-lg transition-colors",
+                            currentCategory === child.slug
+                              ? "bg-brand-light text-brand font-medium"
+                              : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+                          )}
+                        >
+                          {child.name}
+                        </button>
+                      ))}
+                  </div>
+                );
+              })}
+
+              {/* Orphaned children (no parent) */}
+              {childCategories
+                .filter((c) => !topLevelCategories.find((p) => p.id === c.parentId))
+                .map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() =>
+                      router.push(
+                        `/products?${createQueryString("category", cat.slug)}`
+                      )
+                    }
+                    className={cn(
+                      "block w-full text-left text-sm px-3 py-1.5 rounded-lg transition-colors",
+                      currentCategory === cat.slug
+                        ? "bg-brand-light text-brand font-medium"
+                        : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                    )}
+                  >
+                    {cat.name}
+                  </button>
+                ))}
             </div>
           </div>
         )}

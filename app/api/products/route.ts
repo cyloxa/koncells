@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCategoryAndChildrenSlugs } from "@/lib/category";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -14,7 +15,8 @@ export async function GET(request: NextRequest) {
   const where: any = { isActive: true };
 
   if (category) {
-    where.category = { slug: category };
+    const slugs = await getCategoryAndChildrenSlugs(category);
+    where.category = { slug: { in: slugs } };
   }
 
   if (search) {

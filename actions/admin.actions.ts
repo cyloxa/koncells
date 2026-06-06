@@ -56,12 +56,16 @@ const categorySchema = z.object({
   slug: z.string().min(1, "Slug is required"),
   description: z.string().optional(),
   image: z.string().optional(),
+  parentId: z.string().optional().nullable(),
 });
 
 export async function getCategories() {
   return prisma.category.findMany({
-    include: { _count: { select: { products: true } } },
-    orderBy: { name: "asc" },
+    include: {
+      _count: { select: { products: true, children: true } },
+      parent: { select: { id: true, name: true, slug: true } },
+    },
+    orderBy: [{ parentId: { sort: "asc", nulls: "first" } }, { name: "asc" }],
   });
 }
 
@@ -126,13 +130,29 @@ export async function deleteCategory(id: string): Promise<ActionResult<{ id: str
   if (session?.user?.role !== "ADMIN") return { success: false, error: "Unauthorized" };
 
   try {
-    const productCount = await prisma.product.count({ where: { categoryId: id } });
-    if (productCount > 0) {
+    const category = await prisma.category.findUnique({
+      where: { id },
+      select: {
+        _count: { select: { products: true, children: true } },
+      },
+    });
+
+    if (!category) return { success: false, error: "Category not found." };
+
+    if (category._count.children > 0) {
       return {
         success: false,
-        error: `Cannot delete category with ${productCount} product(s). Move or delete products first.`,
+        error: `Cannot delete category with ${category._count.children} subcategor${category._count.children !== 1 ? "ies" : "y"}. Delete subcategories first.`,
       };
     }
+
+    if (category._count.products > 0) {
+      return {
+        success: false,
+        error: `Cannot delete category with ${category._count.products} product(s). Move or delete products first.`,
+      };
+    }
+
     await prisma.category.delete({ where: { id } });
     revalidatePath("/admin/categories");
     return { success: true, data: { id } };
@@ -151,6 +171,19 @@ export async function bulkDeleteCategories(
   if (!parsed.success) return { success: false, error: "Invalid category IDs" };
 
   try {
+    // Check for categories with children
+    const categoriesWithChildren = await prisma.category.findMany({
+      where: { id: { in: parsed.data }, children: { some: {} } },
+      select: { id: true, name: true },
+    });
+
+    if (categoriesWithChildren.length > 0) {
+      return {
+        success: false,
+        error: `Cannot delete categories with subcategories: ${categoriesWithChildren.map((c) => c.name).join(", ")}. Delete subcategories first.`,
+      };
+    }
+
     const categoriesWithProducts = await prisma.category.findMany({
       where: { id: { in: parsed.data }, products: { some: {} } },
       select: { id: true, name: true },
@@ -181,13 +214,19 @@ export async function exportCategoriesCsv(): Promise<ActionResult<string>> {
   try {
     const categories = await prisma.category.findMany({
       orderBy: { name: "asc" },
-      select: { name: true, slug: true, description: true, image: true },
+      select: {
+        name: true,
+        slug: true,
+        description: true,
+        image: true,
+        parent: { select: { slug: true } },
+      },
     });
 
-    const header = "name,slug,description,image";
+    const header = "name,slug,description,image,parentSlug";
     const rows = categories.map(
       (c) =>
-        `${escapeCsvField(c.name)},${escapeCsvField(c.slug)},${escapeCsvField(c.description ?? "")},${escapeCsvField(c.image ?? "")}`
+        `${escapeCsvField(c.name)},${escapeCsvField(c.slug)},${escapeCsvField(c.description ?? "")},${escapeCsvField(c.image ?? "")},${escapeCsvField(c.parent?.slug ?? "")}`
     );
 
     return { success: true, data: [header, ...rows].join("\n") };
@@ -201,6 +240,7 @@ const importCsvSchema = z.object({
   slug: z.string().min(1, "Slug is required"),
   description: z.string().optional().default(""),
   image: z.string().optional().default(""),
+  parentSlug: z.string().optional().default(""),
 });
 
 export async function importCategoriesCsv(
@@ -217,7 +257,7 @@ export async function importCategoriesCsv(
 
     // Validate header
     const header = parseCsvLine(lines[0]);
-    const expectedHeader = ["name", "slug", "description", "image"];
+    const expectedHeader = ["name", "slug", "description", "image", "parentSlug"];
     if (header.length !== expectedHeader.length || !header.every((h, i) => h.toLowerCase() === expectedHeader[i])) {
       return { success: false, error: `CSV header must be: ${expectedHeader.join(",")}` };
     }
@@ -240,29 +280,64 @@ export async function importCategoriesCsv(
         slug: fields[1]?.trim(),
         description: fields[2]?.trim() || "",
         image: fields[3]?.trim() || "",
+        parentSlug: fields[4]?.trim() || "",
       });
 
       if (!parsed.success) {
-        errors.push(`Row ${i + 2} ("${parsed.data?.name || fields[0]}"): ${parsed.error.issues.map((e) => e.message).join(", ")}`);
+        errors.push(`Row ${i + 2} ("${fields[0]}"): ${parsed.error.issues.map((e) => e.message).join(", ")}`);
         skipped++;
         continue;
       }
 
+      // Resolve parentId from parentSlug if provided
+      let parentId: string | null | undefined = undefined;
+      if (parsed.data.parentSlug) {
+        const parent = await prisma.category.findUnique({
+          where: { slug: parsed.data.parentSlug },
+          select: { id: true },
+        });
+        if (!parent) {
+          errors.push(`Row ${i + 2} ("${parsed.data.name}"): parent category "${parsed.data.parentSlug}" not found`);
+          skipped++;
+          continue;
+        }
+        parentId = parent.id;
+      }
+
       try {
+
         await prisma.category.upsert({
           where: { slug: parsed.data.slug },
-          update: { name: parsed.data.name, description: parsed.data.description || null, image: parsed.data.image || null },
-          create: parsed.data,
+          update: {
+            name: parsed.data.name,
+            description: parsed.data.description || null,
+            image: parsed.data.image || null,
+            parentId: parentId ?? null,
+          },
+          create: {
+            name: parsed.data.name,
+            slug: parsed.data.slug,
+            description: parsed.data.description || null,
+            image: parsed.data.image || null,
+            parentId: parentId ?? null,
+          },
         });
         created++;
       } catch (e: unknown) {
         const error = e as { code?: string };
         if (error.code === "P2002") {
-          // Name might be the duplicate, try updating by name
           try {
+            const updateData: any = {
+              slug: parsed.data.slug,
+              description: parsed.data.description || null,
+              image: parsed.data.image || null,
+            };
+            if (parsed.data.parentSlug) {
+              updateData.parentId = parentId ?? null;
+            }
             await prisma.category.update({
               where: { name: parsed.data.name },
-              data: { slug: parsed.data.slug, description: parsed.data.description || null, image: parsed.data.image || null },
+              data: updateData,
             });
             created++;
           } catch {

@@ -18,6 +18,32 @@ enum OrderStatus {
   SHIPPED
   DELIVERED
   CANCELLED
+  PREORDER
+  AWAITING_STOCK
+}
+
+enum PurchaseOrderStatus {
+  PENDING
+  ORDERED
+  SHIPPED
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+enum POItemStatus {
+  PENDING
+  PURCHASED
+  IN_WAREHOUSE
+  CANCELLED
+  RETURNED
+}
+
+enum ShipmentStatus {
+  PENDING_PACKING
+  PACKED
+  IN_TRANSIT
+  DELIVERED
 }
 
 model User {
@@ -90,12 +116,16 @@ model Category {
   slug        String    @unique
   description String?   @db.Text
   image       String?
+  parentId    String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
   products Product[]
 
   @@index([slug])
+  @@index([parentId])
 }
 
 // ─── Brand (managed via Settings) ──────────────────────
@@ -129,6 +159,8 @@ model Product {
   shippingCost     Decimal?  @db.Decimal(10, 2)
   handlerCost      Decimal?  @db.Decimal(10, 2)
   stock            Int       @default(0)
+  reservedStock    Int       @default(0)
+  lowStockThreshold Int?     @default(10)
   isFeatured       Boolean   @default(false)
   showPrice        Boolean   @default(true)
   isActive         Boolean   @default(true)
@@ -145,10 +177,13 @@ model Product {
   category        Category          @relation(fields: [categoryId], references: [id])
   images          ProductImage[]
   reviews         Review[]
-  cartItems       CartItem[]
-  orderItems      OrderItem[]
-  relatedTo       RelatedProduct[]  @relation("ProductRelation")
-  relatedFrom     RelatedProduct[]  @relation("RelatedProductRelation")
+  cartItems        CartItem[]
+  orderItems       OrderItem[]
+  relatedTo        RelatedProduct[]  @relation("ProductRelation")
+  relatedFrom      RelatedProduct[]  @relation("RelatedProductRelation")
+  purchaseOrderItems PurchaseOrderItem[]
+  supplierProducts   SupplierProduct[]
+  warehouseStock     WarehouseStock?
 
   @@index([slug])
   @@index([categoryId])
@@ -249,6 +284,7 @@ model OrderItem {
 
   order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id])
+  preOrderItem PreOrderItem? @relation("OrderItemPreOrder")
 
   @@index([orderId])
 }
@@ -353,4 +389,165 @@ model Backup {
   filename  String
   size      Int      // bytes
   createdAt DateTime @default(now())
+}
+
+// ─── Purchase Order (to Chinese suppliers) ────────────
+
+model PurchaseOrder {
+  id              String              @id @default(uuid())
+  poNumber        Int                 @default(autoincrement())
+  supplierName    String?
+  supplierContact String?
+  supplierId      String?
+  status          PurchaseOrderStatus @default(PENDING)
+  totalCny        Decimal             @db.Decimal(12, 2)
+  exchangeRate    Decimal             @db.Decimal(12, 4)
+  totalLkr        Decimal             @db.Decimal(12, 2)
+  notes           String?             @db.Text
+  orderedAt       DateTime?
+  receivedAt      DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  supplier  Supplier?         @relation(fields: [supplierId], references: [id])
+  items     PurchaseOrderItem[]
+  shipments WarehouseShipment[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([poNumber])
+}
+
+model PurchaseOrderItem {
+  id               String                @id @default(uuid())
+  purchaseOrderId  String
+  productId        String
+  productName      String
+  productSku       String
+  quantity         Int
+  unitPriceCny     Decimal               @db.Decimal(10, 2)
+  lineTotalCny     Decimal               @db.Decimal(12, 2)
+  lineTotalLkr     Decimal               @db.Decimal(12, 2)
+  quantityReceived Int                   @default(0)
+  status           POItemStatus          @default(PENDING)
+  notes            String?               @db.Text
+
+  purchaseOrder  PurchaseOrder     @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product        Product           @relation(fields: [productId], references: [id])
+  preOrderItems  PreOrderItem[]
+  packageItems   WarehousePackageItem[]
+
+  @@index([purchaseOrderId])
+}
+
+model PreOrderItem {
+  id                  String   @id @default(uuid())
+  orderItemId         String   @unique
+  purchaseOrderItemId String
+  quantity            Int
+  createdAt           DateTime @default(now())
+
+  orderItem        OrderItem          @relation("OrderItemPreOrder", fields: [orderItemId], references: [id], onDelete: Cascade)
+  purchaseOrderItem PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id])
+
+  @@index([purchaseOrderItemId])
+}
+
+model WarehouseShipment {
+  id               String         @id @default(uuid())
+  shipmentNumber   Int            @default(autoincrement())
+  purchaseOrderId  String
+  status           ShipmentStatus @default(PENDING_PACKING)
+  totalWeight      Decimal?       @db.Decimal(10, 2)
+  baseShippingCost Decimal?       @db.Decimal(10, 2)
+  extraCost        Decimal?       @db.Decimal(10, 2)
+  totalShippingCost Decimal?      @db.Decimal(10, 2)
+  notes            String?        @db.Text
+  packedAt         DateTime?
+  shippedAt        DateTime?
+  deliveredAt      DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  purchaseOrder PurchaseOrder    @relation(fields: [purchaseOrderId], references: [id])
+  packages      WarehousePackage[]
+
+  @@index([purchaseOrderId])
+  @@index([status])
+}
+
+model WarehousePackage {
+  id                  String   @id @default(uuid())
+  warehouseShipmentId String
+  weight              Decimal  @db.Decimal(10, 2)
+  notes               String?  @db.Text
+  createdAt           DateTime @default(now())
+
+  warehouseShipment WarehouseShipment      @relation(fields: [warehouseShipmentId], references: [id], onDelete: Cascade)
+  items             WarehousePackageItem[]
+
+  @@index([warehouseShipmentId])
+}
+
+model WarehousePackageItem {
+  id                  String @id @default(uuid())
+  warehousePackageId  String
+  purchaseOrderItemId String
+  quantity            Int
+
+  warehousePackage  WarehousePackage  @relation(fields: [warehousePackageId], references: [id], onDelete: Cascade)
+  purchaseOrderItem PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id])
+
+  @@index([warehousePackageId])
+}
+
+// ─── Warehouse Inventory Management ──────────────────────
+
+model WarehouseStock {
+  id              String          @id @default(uuid())
+  productId       String          @unique
+  productName     String
+  productSku      String
+  quantityInStock Int             @default(0)
+  lastUpdated     DateTime        @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productName])
+  @@index([productSku])
+}
+
+// ─── Supplier Management ───────────────────────────────
+
+model Supplier {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  contact      String?
+  email        String?
+  address      String?  @db.Text
+  paymentTerms String?
+  leadTimeDays Int?
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+  products       SupplierProduct[]
+
+  @@index([name])
+}
+
+model SupplierProduct {
+  id          String  @id @default(uuid())
+  supplierId  String
+  productId   String
+  priceCny    Decimal @db.Decimal(10, 2)
+  isPreferred Boolean @default(false)
+  createdAt   DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([supplierId, productId])
+  @@index([productId])
 }

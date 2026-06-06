@@ -94,6 +94,7 @@ export const categorySchema = z.object({
   slug: z.string().min(1, "Slug is required"),
   description: z.string().optional(),
   image: z.string().optional(),
+  parentId: z.string().optional().nullable(),
 });
 
 export type CategoryInput = z.infer<typeof categorySchema>;
@@ -264,4 +265,178 @@ declare module "next-auth/jwt" {
     id?: string;
     role?: string;
   }
+}
+
+// ─── Supplier & Warehouse ―――――――――――――――――――――――
+
+export interface PurchaseOrderWithRelations {
+  id: string;
+  poNumber: number;
+  supplierName: string | null;
+  supplierContact: string | null;
+  supplierId: string | null;
+  supplier?: { id: string; name: string; } | null;
+  status: string;
+  totalCny: number;
+  exchangeRate: number;
+  totalLkr: number;
+  notes: string | null;
+  orderedAt: Date | null;
+  receivedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  items: PurchaseOrderItemWithRelations[];
+  shipments: WarehouseShipmentWithRelations[];
+}
+
+export interface PurchaseOrderItemWithRelations {
+  id: string;
+  purchaseOrderId: string;
+  productId: string;
+  productName: string;
+  productSku: string;
+  quantity: number;
+  unitPriceCny: number;
+  lineTotalCny: number;
+  lineTotalLkr: number;
+  quantityReceived: number;
+  preOrderItems: PreOrderItemWithRelations[];
+  product: {
+    id: string;
+    name: string;
+    slug: string;
+    weight: number | null;
+    images: { url: string; alt: string | null }[];
+  };
+}
+
+export interface PreOrderItemWithRelations {
+  id: string;
+  orderItemId: string;
+  purchaseOrderItemId: string;
+  quantity: number;
+  createdAt: Date;
+  orderItem: {
+    id: string;
+    quantity: number;
+    price: number;
+    orderId: string;
+    product: {
+      id: string;
+      name: string;
+      slug: string;
+      sku: string;
+      images: { url: string; alt: string | null }[];
+    };
+    order: {
+      id: string;
+      orderNumber: number;
+      status: string;
+      createdAt: Date;
+      user: {
+        id: string;
+        name: string | null;
+        email: string;
+      };
+    };
+  };
+  purchaseOrderItem: {
+    id: string;
+    productName: string;
+    productSku: string;
+    quantity: number;
+    quantityReceived: number;
+    purchaseOrder: {
+      id: string;
+      poNumber: number;
+      supplierName: string;
+      status: string;
+    };
+  };
+}
+
+export interface WarehouseShipmentWithRelations {
+  id: string;
+  shipmentNumber: number;
+  purchaseOrderId: string;
+  status: string;
+  totalWeight: number | null;
+  baseShippingCost: number | null;
+  extraCost: number | null;
+  totalShippingCost: number | null;
+  notes: string | null;
+  packedAt: Date | null;
+  shippedAt: Date | null;
+  deliveredAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  purchaseOrder: {
+    id: string;
+    poNumber: number;
+    supplierName: string;
+    status: string;
+  };
+  packages: WarehousePackageWithItems[];
+}
+
+export interface WarehousePackageWithItems {
+  id: string;
+  warehouseShipmentId: string;
+  weight: number;
+  notes: string | null;
+  createdAt: Date;
+  items: {
+    id: string;
+    warehousePackageId: string;
+    purchaseOrderItemId: string;
+    quantity: number;
+    purchaseOrderItem: {
+      productName: string;
+      productSku: string;
+      productId: string;
+    };
+  }[];
+}
+
+// ─── Supplier Types ―――――――――――――――――――――――
+
+export interface SupplierWithRelations {
+  id: string;
+  name: string;
+  contact: string | null;
+  email: string | null;
+  address: string | null;
+  paymentTerms: string | null;
+  leadTimeDays: number | null;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  purchaseOrders?: {
+    id: string;
+    poNumber: number;
+    status: string;
+    totalCny: number;
+    totalLkr: number;
+    createdAt: Date;
+  }[];
+  products?: SupplierProductWithRelations[];
+}
+
+export interface SupplierProductWithRelations {
+  id: string;
+  supplierId: string;
+  productId: string;
+  priceCny: number;
+  isPreferred: boolean;
+  createdAt: Date;
+  supplier?: {
+    id: string;
+    name: string;
+  };
+  product?: {
+    id: string;
+    name: string;
+    sku: string;
+    slug: string;
+  };
 }

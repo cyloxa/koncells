@@ -8,8 +8,11 @@ export default async function AdminCategoriesPage() {
   if (!session?.user || session.user.role !== "ADMIN") redirect("/login");
 
   const categories = await prisma.category.findMany({
-    include: { _count: { select: { products: true } } },
-    orderBy: { name: "asc" },
+    include: {
+      _count: { select: { products: true, children: true } },
+      parent: { select: { id: true, name: true, slug: true } },
+    },
+    orderBy: [{ parentId: { sort: "asc", nulls: "first" } }, { name: "asc" }],
   });
 
   return (

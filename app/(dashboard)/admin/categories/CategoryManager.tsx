@@ -15,6 +15,8 @@ import {
   Upload,
   CheckSquare,
   Square,
+  ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 import {
   createCategory,
@@ -33,7 +35,9 @@ interface Category {
   slug: string;
   description: string | null;
   image: string | null;
-  _count: { products: number };
+  parentId: string | null;
+  parent: { id: string; name: string; slug: string } | null;
+  _count: { products: number; children: number };
 }
 
 interface CategoryManagerProps {
@@ -49,6 +53,7 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [image, setImage] = useState("");
+  const [parentId, setParentId] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Bulk select state
@@ -66,12 +71,22 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Collapse state for parent categories
+  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
+
+  const topLevelCategories = categories.filter((c) => !c.parentId);
+  const childCategories = categories.filter((c) => c.parentId);
+
+  const getChildren = (parentId: string) =>
+    childCategories.filter((c) => c.parentId === parentId);
+
   const openCreate = () => {
     setEditingCategory(null);
     setName("");
     setSlug("");
     setDescription("");
     setImage("");
+    setParentId("");
     setErrors({});
     setIsModalOpen(true);
   };
@@ -82,6 +97,7 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
     setSlug(category.slug);
     setDescription(category.description ?? "");
     setImage(category.image ?? "");
+    setParentId(category.parentId ?? "");
     setErrors({});
     setIsModalOpen(true);
   };
@@ -117,6 +133,7 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
         slug: slug.trim(),
         description: description.trim() || undefined,
         image: image.trim() || undefined,
+        parentId: parentId || null,
       };
       let result;
       if (editingCategory) {
@@ -140,6 +157,12 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
 
   const handleDelete = async (category: Category) => {
     if (!confirm(`Are you sure you want to delete "${category.name}"?`)) return;
+    if (category._count.children > 0) {
+      toast.error(
+        `Cannot delete "${category.name}" — it has ${category._count.children} subcategor${category._count.children !== 1 ? "ies" : "y"}. Delete subcategories first.`
+      );
+      return;
+    }
     if (category._count.products > 0) {
       toast.error(
         `Cannot delete "${category.name}" — it has ${category._count.products} product(s).`
@@ -157,6 +180,18 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
     } catch {
       toast.error("Failed to delete category");
     }
+  };
+
+  const toggleParentCollapse = (id: string) => {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   };
 
   // ─── Bulk Selection ─────────────────────────────────
@@ -270,6 +305,11 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
 
   const allSelected = categories.length > 0 && selectedIds.size === categories.length;
 
+  // Available parent categories (top-level for new, exclude self for edit)
+  const parentOptions = categories.filter(
+    (c) => !c.parentId && (!editingCategory || c.id !== editingCategory.id)
+  );
+
   return (
     <>
       {/* Top bar: actions */}
@@ -335,78 +375,157 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-600">Name</th>
                 <th className="text-left py-3 px-4 font-medium text-gray-600">Slug</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-600">Description</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-600">Parent</th>
+                <th className="text-center py-3 px-4 font-medium text-gray-600">Subs</th>
                 <th className="text-center py-3 px-4 font-medium text-gray-600">Products</th>
                 <th className="text-right py-3 px-4 font-medium text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {categories.map((category) => (
-                <tr
-                  key={category.id}
-                  className={`border-b border-gray-100 hover:bg-gray-50 ${
-                    selectedIds.has(category.id) ? "bg-brand-light/30" : ""
-                  }`}
-                >
-                  <td className="py-3 px-4">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(category.id)}
-                      onChange={() => toggleSelect(category.id)}
-                      className="rounded border-gray-300 text-brand focus:ring-brand"
-                    />
-                  </td>
-                  <td className="py-3 px-4">
-                    <div className="flex items-center gap-3">
-                      {category.image ? (
-                        <img
-                          src={category.image}
-                          alt={category.name}
-                          className="h-8 w-8 rounded-lg object-cover"
-                        />
-                      ) : (
-                        <div className="h-8 w-8 rounded-lg bg-brand-light flex items-center justify-center">
-                          <span className="text-xs font-medium text-brand">
-                            {category.name.charAt(0)}
-                          </span>
-                        </div>
-                      )}
-                      <span className="font-medium text-gray-900">{category.name}</span>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4 text-gray-500 font-mono text-xs">{category.slug}</td>
-                  <td className="py-3 px-4 text-gray-500 max-w-xs truncate">
-                    {category.description ?? "—"}
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <span className="inline-flex items-center justify-center h-6 w-8 rounded-full bg-gray-100 text-xs font-medium text-gray-700">
-                      {category._count.products}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(category)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDelete(category)}
-                        disabled={category._count.products > 0}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {categories.length === 0 && (
+              {topLevelCategories.length === 0 && childCategories.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-gray-500">
+                  <td colSpan={7} className="py-12 text-center text-gray-500">
                     No categories yet. Create one to get started.
                   </td>
                 </tr>
               )}
+              {topLevelCategories.map((category) => {
+                const children = getChildren(category.id);
+                const isCollapsed = collapsedParents.has(category.id);
+                const hasChildren = children.length > 0;
+
+                return (
+                  <tr key={category.id}>
+                    <td className="py-3 px-4" colSpan={7}>
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        {/* Parent row */}
+                        <div
+                          className={`flex items-center justify-between py-2.5 px-4 ${
+                            selectedIds.has(category.id) ? "bg-brand-light/30" : "bg-gray-50/80"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(category.id)}
+                                onChange={() => toggleSelect(category.id)}
+                                className="rounded border-gray-300 text-brand focus:ring-brand"
+                              />
+                              {hasChildren && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleParentCollapse(category.id)}
+                                  className="p-0.5 text-gray-400 hover:text-gray-600"
+                                >
+                                  {isCollapsed ? (
+                                    <ChevronRight className="h-4 w-4" />
+                                  ) : (
+                                    <ChevronDown className="h-4 w-4" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                            {category.image ? (
+                              <img
+                                src={category.image}
+                                alt={category.name}
+                                className="h-8 w-8 rounded-lg object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="h-8 w-8 rounded-lg bg-brand-light flex items-center justify-center flex-shrink-0">
+                                <span className="text-xs font-medium text-brand">
+                                  {category.name.charAt(0)}
+                                </span>
+                              </div>
+                            )}
+                            <span className="font-medium text-gray-900">{category.name}</span>
+                            {hasChildren && (
+                              <span className="text-xs text-gray-400">
+                                ({children.length} sub{children.length !== 1 ? "s" : ""})
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-4 text-xs text-gray-500 flex-shrink-0">
+                            <span className="font-mono">{category.slug}</span>
+                            <span className="text-gray-400">—</span>
+                            <span className="inline-flex items-center justify-center h-6 w-8 rounded-full bg-gray-100 text-xs font-medium text-gray-700">
+                              {category._count.products}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <Button variant="ghost" size="icon" onClick={() => openEdit(category)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDelete(category)}
+                                disabled={category._count.children > 0 || category._count.products > 0}
+                              >
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Child rows */}
+                        {!isCollapsed &&
+                          children.map((child) => (
+                            <div
+                              key={child.id}
+                              className={`flex items-center justify-between py-2.5 px-4 border-t border-gray-100 ${
+                                selectedIds.has(child.id) ? "bg-brand-light/20" : ""
+                              }`}
+                            >
+                              <div className="flex items-center gap-3 flex-1 min-w-0 pl-9">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIds.has(child.id)}
+                                  onChange={() => toggleSelect(child.id)}
+                                  className="rounded border-gray-300 text-brand focus:ring-brand"
+                                />
+                                {child.image ? (
+                                  <img
+                                    src={child.image}
+                                    alt={child.name}
+                                    className="h-7 w-7 rounded-lg object-cover flex-shrink-0"
+                                  />
+                                ) : (
+                                  <div className="h-7 w-7 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+                                    <span className="text-xs font-medium text-gray-500">
+                                      {child.name.charAt(0)}
+                                    </span>
+                                  </div>
+                                )}
+                                <span className="text-gray-700">{child.name}</span>
+                              </div>
+                              <div className="flex items-center gap-4 text-xs text-gray-500 flex-shrink-0">
+                                <span className="font-mono">{child.slug}</span>
+                                <span className="text-gray-400">{child.parent?.name ?? "—"}</span>
+                                <span className="inline-flex items-center justify-center h-6 w-8 rounded-full bg-gray-100 text-xs font-medium text-gray-700">
+                                  {child._count.products}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <Button variant="ghost" size="icon" onClick={() => openEdit(child)}>
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleDelete(child)}
+                                    disabled={child._count.products > 0}
+                                  >
+                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -456,6 +575,24 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
                   placeholder="category-slug"
                   error={errors.slug}
                 />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Parent Category</label>
+                <select
+                  value={parentId}
+                  onChange={(e) => setParentId(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition-all"
+                >
+                  <option value="">— Top Level —</option>
+                  {parentOptions.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400">
+                  Leave empty for a top-level category.
+                </p>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700">Description</label>
@@ -508,11 +645,12 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
               <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-600 space-y-2">
                 <p className="font-medium text-gray-800">CSV format:</p>
                 <code className="block text-xs font-mono bg-white p-2 rounded border border-gray-200">
-                  name,slug,description,image
+                  name,slug,description,image,parentSlug
                 </code>
                 <p className="text-xs text-gray-500">
                   The first row must be the header. Categories with existing slugs will be updated.
-                  Description and image are optional.
+                  Description, image, and parentSlug are optional.
+                  Parent categories must be imported before their children.
                 </p>
               </div>
 
@@ -587,9 +725,8 @@ export function CategoryManager({ categories }: CategoryManagerProps) {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    // Download a sample CSV
                     const sample =
-                      "name,slug,description,image\nElectronics,electronics,Electronic devices and accessories,\nClothing,clothing,Apparel and fashion items,\n";
+                      "name,slug,description,image,parentSlug\nElectronics,electronics,Electronic devices and accessories,,\nHeadphones,headphones,High-quality audio gear,,electronics\nClothing,clothing,Apparel and fashion items,,\nShirts,shirts,Classic and modern shirts,,clothing\n";
                     const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement("a");

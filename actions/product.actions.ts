@@ -7,6 +7,7 @@ import type { ProductInput } from "@/types";
 import { escapeCsvField, parseCsvLine, validateCsvHeader } from "@/lib/csv";
 import { uploadImageFromUrl } from "@/lib/upload";
 import { auth } from "@/lib/auth";
+import { getCategoryAndChildrenSlugs } from "@/lib/category";
 import { z } from "zod";
 
 export async function getProducts(params?: {
@@ -22,7 +23,8 @@ export async function getProducts(params?: {
   const where: any = { isActive: true };
 
   if (category) {
-    where.category = { slug: category };
+    const slugs = await getCategoryAndChildrenSlugs(category);
+    where.category = { slug: { in: slugs } };
   }
 
   if (search) {
@@ -70,7 +72,14 @@ export async function getProductBySlug(slug: string) {
   const product = await prisma.product.findUnique({
     where: { slug },
     include: {
-      category: { select: { id: true, name: true, slug: true } },
+      category: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          parent: { select: { id: true, name: true, slug: true } },
+        },
+      },
       images: { orderBy: { position: "asc" } },
       reviews: {
         include: {
@@ -93,8 +102,11 @@ export async function getProductBySlug(slug: string) {
 
 export async function getCategories() {
   return prisma.category.findMany({
-    include: { _count: { select: { products: true } } },
-    orderBy: { name: "asc" },
+    include: {
+      _count: { select: { products: true, children: true } },
+      parent: { select: { id: true, name: true, slug: true } },
+    },
+    orderBy: [{ parentId: { sort: "asc", nulls: "first" } }, { name: "asc" }],
   });
 }
 
