@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Eye, Package } from "lucide-react";
+import { Eye, Package, ExternalLink, Trash2, Loader2 } from "lucide-react";
+import { deleteWarehouseShipments } from "@/actions/warehouse.actions";
 
 interface ShipmentRow {
   id: string;
+  name: string | null;
   shipmentNumber: number;
   status: string;
   totalWeight: number | null;
@@ -20,6 +22,7 @@ interface ShipmentRow {
   createdAt: Date;
   updatedAt: Date;
   purchaseOrder: {
+    id: string;
     poNumber: number;
     supplierName: string | null;
   };
@@ -27,6 +30,7 @@ interface ShipmentRow {
     id: string;
     weight: number | null;
   }[];
+  inventoryItemCount: number;
 }
 
 interface WarehouseShipmentsTableProps {
@@ -40,11 +44,58 @@ const statusColors: Record<string, string> = {
   DELIVERED: "bg-green-100 text-green-800",
 };
 
+const statusLabels: Record<string, string> = {
+  PENDING_PACKING: "Pending Packing",
+  PACKED: "Packed",
+  IN_TRANSIT: "In Transit",
+  DELIVERED: "Delivered",
+};
+
 export function WarehouseShipmentsTable({
   initialShipments,
 }: WarehouseShipmentsTableProps) {
   const router = useRouter();
-  const [shipments] = useState(initialShipments);
+  const [shipments, setShipments] = useState(initialShipments);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === shipments.length) return new Set();
+      return new Set(shipments.map((s) => s.id));
+    });
+  }, [shipments]);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+    const confirmed = window.confirm(
+      `Delete ${selectedIds.size} shipment${selectedIds.size !== 1 ? "s" : ""}? This will unlink inventory items from them.`
+    );
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+    const result = await deleteWarehouseShipments(Array.from(selectedIds));
+    setIsDeleting(false);
+
+    if (result.success) {
+      setShipments((prev) =>
+        prev.filter((s) => !selectedIds.has(s.id))
+      );
+      setSelectedIds(new Set());
+      router.refresh();
+    } else {
+      alert(result.error);
+    }
+  }, [selectedIds, router]);
 
   const fmtLkr = (n: number) =>
     n.toLocaleString("en-US", {
@@ -53,15 +104,38 @@ export function WarehouseShipmentsTable({
       minimumFractionDigits: 0,
     });
 
+  const getShipmentLabel = (s: ShipmentRow) => {
+    const num = `SHIP-${String(s.shipmentNumber).padStart(4, "0")}`;
+    return s.name ? `${num} — ${s.name}` : num;
+  };
+
+  const allSelected = shipments.length > 0 && selectedIds.size === shipments.length;
+
   return (
     <>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Warehouse Shipments</h1>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Warehouse Shipments
+          </h1>
           <p className="text-gray-600 text-sm mt-1">
             {shipments.length} shipment{shipments.length !== 1 ? "s" : ""}
           </p>
         </div>
+        {selectedIds.size > 0 && (
+          <button
+            onClick={handleBulkDelete}
+            disabled={isDeleting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
+          >
+            {isDeleting ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <Trash2 size={15} />
+            )}
+            Delete {selectedIds.size} shipment{selectedIds.size !== 1 ? "s" : ""}
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -69,38 +143,73 @@ export function WarehouseShipmentsTable({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="text-left py-3 px-4 font-medium text-gray-600">Shipment #</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-600">PO #</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-600">Supplier</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-600">Status</th>
-                <th className="text-right py-3 px-4 font-medium text-gray-600">Packages</th>
-                <th className="text-right py-3 px-4 font-medium text-gray-600">Total Weight</th>
-                <th className="text-right py-3 px-4 font-medium text-gray-600">Shipping Cost</th>
-                <th className="text-right py-3 px-4 font-medium text-gray-600">Date</th>
-                <th className="text-center py-3 px-4 font-medium text-gray-600">Actions</th>
+                <th className="w-10 py-3 px-4">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                    className="rounded border-gray-300 text-brand focus:ring-brand"
+                  />
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-gray-600">
+                  Shipment
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-gray-600">
+                  Purchase Order
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-gray-600">
+                  Status
+                </th>
+                <th className="text-right py-3 px-4 font-medium text-gray-600">
+                  Items
+                </th>
+                <th className="text-right py-3 px-4 font-medium text-gray-600">
+                  Total Weight
+                </th>
+                <th className="text-right py-3 px-4 font-medium text-gray-600">
+                  Shipping Cost
+                </th>
+                <th className="text-right py-3 px-4 font-medium text-gray-600">
+                  Date
+                </th>
+                <th className="text-center py-3 px-4 font-medium text-gray-600">
+                  View
+                </th>
               </tr>
             </thead>
             <tbody>
               {shipments.map((shipment) => (
                 <tr
                   key={shipment.id}
-                  className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                  className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${
+                    selectedIds.has(shipment.id) ? "bg-brand/5" : ""
+                  }`}
                 >
                   <td className="py-3 px-4">
-                    <span className="font-mono text-xs font-medium text-gray-900">
-                      #{shipment.shipmentNumber}
-                    </span>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(shipment.id)}
+                      onChange={() => toggleSelect(shipment.id)}
+                      className="rounded border-gray-300 text-brand focus:ring-brand"
+                    />
                   </td>
                   <td className="py-3 px-4">
                     <Link
-                      href={`/admin/purchase-orders/`}
-                      className="font-mono text-xs text-brand hover:text-brand/80"
+                      href={`/admin/shipments/${shipment.id}`}
+                      className="font-medium text-gray-900 hover:text-brand transition-colors"
                     >
-                      PO-{String(shipment.purchaseOrder.poNumber).padStart(4, "0")}
+                      {getShipmentLabel(shipment)}
                     </Link>
                   </td>
-                  <td className="py-3 px-4 text-gray-900">
-                    {shipment.purchaseOrder.supplierName ?? "N/A"}
+                  <td className="py-3 px-4">
+                    <Link
+                      href={`/admin/purchase-orders/${shipment.purchaseOrder.id}`}
+                      className="inline-flex items-center gap-1 text-brand hover:text-brand/80 font-medium text-xs"
+                    >
+                      PO-
+                      {String(shipment.purchaseOrder.poNumber).padStart(4, "0")}
+                      <ExternalLink size={11} />
+                    </Link>
                   </td>
                   <td className="py-3 px-4">
                     <span
@@ -108,11 +217,14 @@ export function WarehouseShipmentsTable({
                         statusColors[shipment.status] ?? "bg-gray-100 text-gray-700"
                       }`}
                     >
-                      {shipment.status.replace(/_/g, " ")}
+                      {statusLabels[shipment.status] ?? shipment.status}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-right text-gray-900">
-                    {shipment.packages.length}
+                  <td className="py-3 px-4 text-right">
+                    <span className="inline-flex items-center gap-1 text-gray-900 font-medium">
+                      <Package size={13} className="text-gray-400" />
+                      {shipment.inventoryItemCount}
+                    </span>
                   </td>
                   <td className="py-3 px-4 text-right text-gray-900">
                     {shipment.totalWeight
@@ -133,7 +245,7 @@ export function WarehouseShipmentsTable({
                   </td>
                   <td className="py-3 px-4 text-center">
                     <Link
-                      href={`/admin/warehouse/${shipment.id}`}
+                      href={`/admin/shipments/${shipment.id}`}
                       className="inline-flex items-center text-brand hover:text-brand/80"
                     >
                       <Eye className="h-4 w-4" />

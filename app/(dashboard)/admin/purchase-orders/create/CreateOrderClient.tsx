@@ -13,12 +13,6 @@ interface ProductOption {
   price: number;
 }
 
-interface SupplierOption {
-  id: string;
-  name: string;
-  contact: string | null;
-}
-
 interface LineItem {
   productId: string;
   quantity: number;
@@ -28,38 +22,19 @@ interface LineItem {
 
 interface CreateOrderClientProps {
   products: ProductOption[];
-  suppliers: SupplierOption[];
   defaultExchangeRate: number | null;
 }
 
 export function CreateOrderClient({
   products,
-  suppliers,
   defaultExchangeRate,
 }: CreateOrderClientProps) {
   const router = useRouter();
-  const [supplierId, setSupplierId] = useState("");
   const [supplierName, setSupplierName] = useState("");
   const [supplierContact, setSupplierContact] = useState("");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<LineItem[]>([{ productId: "", quantity: 1, unitPriceCny: 0, notes: "" }]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const selectedSupplier = suppliers.find((s) => s.id === supplierId);
-
-  const handleSupplierChange = (id: string) => {
-    setSupplierId(id);
-    if (id) {
-      const sup = suppliers.find((s) => s.id === id);
-      if (sup) {
-        setSupplierName(sup.name);
-        setSupplierContact(sup.contact ?? "");
-      }
-    } else {
-      setSupplierName("");
-      setSupplierContact("");
-    }
-  };
 
   const addItem = () => {
     setItems((prev) => [...prev, { productId: "", quantity: 1, unitPriceCny: 0, notes: "" }]);
@@ -79,7 +54,6 @@ export function CreateOrderClient({
     const product = products.find((p) => p.id === productId);
     updateItem(index, "productId", productId);
     if (product && items[index].unitPriceCny === 0) {
-      // Suggest a default price based on the product price (rough conversion)
       const suggestedCny = defaultExchangeRate ? Math.round(product.price / defaultExchangeRate) : 0;
       updateItem(index, "unitPriceCny", suggestedCny);
     }
@@ -103,7 +77,6 @@ export function CreateOrderClient({
         const result = await createPurchaseOrder({
           supplierName: supplierName.trim(),
           supplierContact: supplierContact.trim() || null,
-          supplierId: supplierId || null,
           items: items.map((i) => ({
             productId: i.productId,
             quantity: i.quantity,
@@ -126,7 +99,7 @@ export function CreateOrderClient({
         setIsSubmitting(false);
       }
     },
-    [items, supplierName, supplierContact, supplierId, notes, router]
+    [items, supplierName, supplierContact, notes, router]
   );
 
   return (
@@ -148,21 +121,6 @@ export function CreateOrderClient({
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Supplier Details</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
-              <select
-                value={supplierId}
-                onChange={(e) => handleSupplierChange(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand focus:border-brand"
-              >
-                <option value="">Enter manually or select...</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Supplier Name <span className="text-red-500">*</span>

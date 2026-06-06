@@ -12,13 +12,13 @@ type ActionResult<T = void> =
 const createPurchaseOrderSchema = z.object({
   supplierName: z.string().min(1, "Supplier name is required"),
   supplierContact: z.string().optional().nullable(),
-  supplierId: z.string().optional().nullable(),
   items: z
     .array(
       z.object({
         productId: z.string(),
         quantity: z.number().int().min(1),
         unitPriceCny: z.number().min(0),
+        notes: z.string().optional().nullable(),
       })
     )
     .min(1),
@@ -72,6 +72,7 @@ export async function createPurchaseOrder(
           unitPriceCny: item.unitPriceCny,
           lineTotalCny: lineCny,
           lineTotalLkr: lineLkr,
+          notes: item.notes ?? null,
         };
       })
     );
@@ -80,7 +81,6 @@ export async function createPurchaseOrder(
       data: {
         supplierName: parsed.data.supplierName,
         supplierContact: parsed.data.supplierContact ?? null,
-        supplierId: parsed.data.supplierId ?? null,
         totalCny,
         exchangeRate: rate,
         totalLkr,
@@ -292,6 +292,7 @@ const addItemsSchema = z.object({
         productId: z.string(),
         quantity: z.number().int().min(1),
         unitPriceCny: z.number().min(0),
+        notes: z.string().optional().nullable(),
       })
     )
     .min(1),
@@ -307,53 +308,82 @@ export async function addItemsToPurchaseOrder(
   if (!parsed.success) return { success: false, error: "Invalid input" };
 
   try {
-    const po = await prisma.purchaseOrder.findUnique({
-      where: { id: parsed.data.purchaseOrderId },
-      select: { id: true, exchangeRate: true, status: true },
-    });
+    const result = await prisma.$transaction(async (tx) => {
+      const po = await tx.purchaseOrder.findUnique({
+        where: { id: parsed.data.purchaseOrderId },
+        select: { id: true, exchangeRate: true, status: true },
+      });
 
-    if (!po) return { success: false, error: "Purchase order not found" };
-    if (po.status !== "PENDING" && po.status !== "ORDERED") {
-      return { success: false, error: "Can only add items to PENDING or ORDERED purchase orders" };
-    }
+      if (!po) throw new Error("Purchase order not found");
+      if (po.status !== "PENDING" && po.status !== "ORDERED") {
+        throw new Error("Can only add items to PENDING or ORDERED purchase orders");
+      }
 
-    const rate = Number(po.exchangeRate);
+      // Check for duplicate product IDs already on this PO
+      const existingProductIds = new Set(
+        (await tx.purchaseOrderItem.findMany({
+          where: { purchaseOrderId: parsed.data.purchaseOrderId },
+          select: { productId: true },
+        })).map((i) => i.productId)
+      );
 
-    const itemsData = await Promise.all(
-      parsed.data.items.map(async (item) => {
-        const product = await prisma.product.findUnique({
-          where: { id: item.productId },
-          select: { name: true, sku: true },
+      const newProductIds = new Set(parsed.data.items.map((item) => item.productId));
+      const duplicates = [...newProductIds].filter((id) => existingProductIds.has(id));
+      if (duplicates.length > 0) {
+        const productDetails = await tx.product.findMany({
+          where: { id: { in: duplicates } },
+          select: { name: true },
         });
+        const names = productDetails.map((p) => p.name).join(", ");
+        throw new Error(`Product(s) already on this PO: ${names}. Remove existing items or update their quantities instead.`);
+      }
 
-        if (!product) throw new Error(`Product not found: ${item.productId}`);
+      // Also check for duplicate product IDs within the new items themselves
+      if (newProductIds.size !== parsed.data.items.length) {
+        throw new Error("Duplicate products in the new items list. Each product must be unique.");
+      }
 
-        return {
-          purchaseOrderId: parsed.data.purchaseOrderId,
-          productId: item.productId,
-          productName: product.name,
-          productSku: product.sku,
-          quantity: item.quantity,
-          unitPriceCny: item.unitPriceCny,
-          lineTotalCny: item.unitPriceCny * item.quantity,
-          lineTotalLkr: item.unitPriceCny * item.quantity * rate,
-        };
-      })
-    );
+      const rate = Number(po.exchangeRate);
 
-    await prisma.purchaseOrderItem.createMany({ data: itemsData });
+      const itemsData = await Promise.all(
+        parsed.data.items.map(async (item) => {
+          const product = await tx.product.findUnique({
+            where: { id: item.productId },
+            select: { name: true, sku: true },
+          });
 
-    // Recalculate totals
-    const allItems = await prisma.purchaseOrderItem.findMany({
-      where: { purchaseOrderId: parsed.data.purchaseOrderId },
-    });
+          if (!product) throw new Error(`Product not found: ${item.productId}`);
 
-    const totalCny = allItems.reduce((sum, i) => sum + Number(i.lineTotalCny), 0);
-    const totalLkr = allItems.reduce((sum, i) => sum + Number(i.lineTotalLkr), 0);
+          return {
+            purchaseOrderId: parsed.data.purchaseOrderId,
+            productId: item.productId,
+            productName: product.name,
+            productSku: product.sku,
+            quantity: item.quantity,
+            unitPriceCny: item.unitPriceCny,
+            lineTotalCny: item.unitPriceCny * item.quantity,
+            lineTotalLkr: item.unitPriceCny * item.quantity * rate,
+            notes: item.notes ?? null,
+          };
+        })
+      );
 
-    await prisma.purchaseOrder.update({
-      where: { id: parsed.data.purchaseOrderId },
-      data: { totalCny, totalLkr },
+      await tx.purchaseOrderItem.createMany({ data: itemsData });
+
+      // Recalculate totals
+      const allItems = await tx.purchaseOrderItem.findMany({
+        where: { purchaseOrderId: parsed.data.purchaseOrderId },
+      });
+
+      const totalCny = allItems.reduce((sum, i) => sum + Number(i.lineTotalCny), 0);
+      const totalLkr = allItems.reduce((sum, i) => sum + Number(i.lineTotalLkr), 0);
+
+      await tx.purchaseOrder.update({
+        where: { id: parsed.data.purchaseOrderId },
+        data: { totalCny, totalLkr },
+      });
+
+      return true;
     });
 
     revalidatePath(`/admin/purchase-orders/${parsed.data.purchaseOrderId}`);
@@ -429,64 +459,62 @@ export async function updatePurchaseOrderItemStatus(
     const item = await prisma.purchaseOrderItem.findUnique({
       where: { id: poItemId },
       select: {
+        purchaseOrderId: true,
         productId: true,
         productName: true,
         productSku: true,
         quantity: true,
+        quantityReceived: true,
         purchaseOrder: { select: { id: true } },
       },
     });
 
     if (!item) return { success: false, error: "Item not found" };
 
+    const previousStatus = (
+      await prisma.purchaseOrderItem.findUnique({
+        where: { id: poItemId },
+        select: { status: true },
+      })
+    )?.status;
+
     await prisma.purchaseOrderItem.update({
       where: { id: poItemId },
       data: { status },
     });
 
-    // When status changes to IN_WAREHOUSE, upsert the warehouse stock
-    if (status === "IN_WAREHOUSE") {
-      await prisma.warehouseStock.upsert({
-        where: { productId: item.productId },
-        create: {
+    // When status changes to IN_WAREHOUSE, create a warehouse inventory item
+    // Use quantityReceived (what was actually received) not quantity (what was ordered).
+    // Delete any existing IN_WAREHOUSE records first to avoid duplicates from status toggling.
+    if (status === "IN_WAREHOUSE" && previousStatus !== "IN_WAREHOUSE") {
+      await prisma.warehouseInventoryItem.deleteMany({
+        where: {
+          purchaseOrderId: item.purchaseOrderId,
+          productId: item.productId,
+          status: "IN_WAREHOUSE",
+        },
+      });
+
+      await prisma.warehouseInventoryItem.create({
+        data: {
+          purchaseOrderId: item.purchaseOrderId,
           productId: item.productId,
           productName: item.productName,
-          productSku: item.productSku,
-          quantityInStock: item.quantity,
-        },
-        update: {
-          quantityInStock: { increment: item.quantity },
-          productName: item.productName,
-          productSku: item.productSku,
+          quantity: item.quantityReceived,
+          status: "IN_WAREHOUSE",
         },
       });
     }
 
-    // If status changes away from IN_WAREHOUSE (e.g. CANCELLED or RETURNED),
-    // decrement the warehouse stock (but don't go below 0)
-    if (status !== "IN_WAREHOUSE") {
-      const existing = await prisma.warehouseStock.findUnique({
-        where: { productId: item.productId },
+    // If status changes away from IN_WAREHOUSE, remove the inventory items
+    if (status !== "IN_WAREHOUSE" && previousStatus === "IN_WAREHOUSE") {
+      await prisma.warehouseInventoryItem.deleteMany({
+        where: {
+          purchaseOrderId: item.purchaseOrderId,
+          productId: item.productId,
+          status: "IN_WAREHOUSE",
+        },
       });
-
-      if (existing && existing.quantityInStock > 0) {
-        const previousStatus = (
-          await prisma.purchaseOrderItem.findUnique({
-            where: { id: poItemId },
-            select: { status: true },
-          })
-        )?.status;
-
-        // Only decrement if the item was previously IN_WAREHOUSE
-        if (previousStatus === "IN_WAREHOUSE") {
-          await prisma.warehouseStock.update({
-            where: { productId: item.productId },
-            data: {
-              quantityInStock: Math.max(0, existing.quantityInStock - item.quantity),
-            },
-          });
-        }
-      }
     }
 
     revalidatePath("/admin/warehouse/inventory");
@@ -689,8 +717,54 @@ export async function deletePurchaseOrders(
   if (ids.length === 0) return { success: false, error: "No purchase orders selected" };
 
   try {
+    // Delete related records in the right order to avoid FK violations
+    for (const poId of ids) {
+      // 1. Delete PreOrderItems linked to this PO's items
+      await prisma.preOrderItem.deleteMany({
+        where: { purchaseOrderItem: { purchaseOrderId: poId } },
+      });
+
+      // 2. Delete WarehousePackageItems linked to this PO's items
+      //    (need to find package item IDs via purchase order items)
+      const poItemIds = await prisma.purchaseOrderItem.findMany({
+        where: { purchaseOrderId: poId },
+        select: { id: true },
+      });
+      const poItemIdList = poItemIds.map((i) => i.id);
+
+      if (poItemIdList.length > 0) {
+        await prisma.warehousePackageItem.deleteMany({
+          where: { purchaseOrderItemId: { in: poItemIdList } },
+        });
+      }
+
+      // 3. Delete WarehousePackages (via shipments cascade) — first get shipment IDs
+      const shipmentIds = await prisma.warehouseShipment.findMany({
+        where: { purchaseOrderId: poId },
+        select: { id: true },
+      });
+
+      // 4. Delete WarehousePackages first (will cascade package items)
+      for (const sid of shipmentIds.map((s) => s.id)) {
+        await prisma.warehousePackage.deleteMany({
+          where: { warehouseShipmentId: sid },
+        });
+      }
+
+      // 5. Delete WarehouseInventoryItems
+      await prisma.warehouseInventoryItem.deleteMany({
+        where: { purchaseOrderId: poId },
+      });
+
+      // 6. Delete WarehouseShipments (packages already cleaned up)
+      await prisma.warehouseShipment.deleteMany({
+        where: { purchaseOrderId: poId },
+      });
+    }
+
+    // Now delete the purchase orders (items cascade automatically)
     await prisma.purchaseOrder.deleteMany({
-      where: { id: { in: ids }, status: { in: ["PENDING", "CANCELLED"] } },
+      where: { id: { in: ids }, status: { notIn: ["RECEIVED"] } },
     });
 
     revalidatePath("/admin/purchase-orders");
@@ -720,6 +794,100 @@ export async function updatePurchaseOrderNotes(
     return { success: true, data: { success: true } };
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Failed to update notes";
+    return { success: false, error: message };
+  }
+}
+
+// ─── Warehouse Inventory Actions ───────────────────────
+
+export async function getWarehouseInventory() {
+  const session = await auth();
+  if (session?.user?.role !== "ADMIN") throw new Error("Unauthorized");
+
+  const items = await prisma.warehouseInventoryItem.findMany({
+    include: {
+      purchaseOrder: {
+        select: {
+          id: true,
+          poNumber: true,
+        },
+      },
+      product: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          weight: true,
+          price: true,
+          stock: true,
+          reservedStock: true,
+          images: { orderBy: { position: "asc" }, take: 1 },
+        },
+      },
+      shipment: {
+        select: {
+          id: true,
+          shipmentNumber: true,
+          status: true,
+        },
+      },
+    },
+    orderBy: { lastUpdated: "desc" },
+  });
+
+  return items.map((item) => ({
+    id: item.id,
+    purchaseOrderId: item.purchaseOrderId,
+    purchaseOrderNumber: item.purchaseOrder.poNumber,
+    productId: item.productId,
+    productName: item.productName,
+    quantity: item.quantity,
+    weight: item.weight ? Number(item.weight) : null,
+    status: item.status,
+    shipmentId: item.shipmentId,
+    shipmentNumber: item.shipment?.shipmentNumber ?? null,
+    shipmentStatus: item.shipment?.status ?? null,
+    lastUpdated: item.lastUpdated,
+    createdAt: item.createdAt,
+    product: item.product
+      ? {
+          id: item.product.id,
+          name: item.product.name,
+          slug: item.product.slug,
+          weight: item.product.weight ? Number(item.product.weight) : null,
+          price: Number(item.product.price),
+          stock: item.product.stock,
+          reservedStock: item.product.reservedStock,
+          images: item.product.images,
+        }
+      : null,
+  }));
+}
+
+export async function updateInventoryItem(
+  inventoryItemId: string,
+  data: {
+    shipmentId?: string | null;
+    weight?: number | null;
+  }
+): Promise<ActionResult<{ success: true }>> {
+  const session = await auth();
+  if (session?.user?.role !== "ADMIN") return { success: false, error: "Unauthorized" };
+
+  try {
+    const updateData: Record<string, unknown> = {};
+    if (data.shipmentId !== undefined) updateData.shipmentId = data.shipmentId;
+    if (data.weight !== undefined) updateData.weight = data.weight;
+
+    await prisma.warehouseInventoryItem.update({
+      where: { id: inventoryItemId },
+      data: updateData,
+    });
+
+    revalidatePath("/admin/warehouse/inventory");
+    return { success: true, data: { success: true } };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "Failed to update inventory item";
     return { success: false, error: message };
   }
 }

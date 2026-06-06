@@ -7,14 +7,10 @@ export default async function CreatePurchaseOrderPage() {
   const session = await auth();
   if (!session?.user || session.user.role !== "ADMIN") redirect("/login");
 
-  const [products, suppliers, exchangeRates] = await Promise.all([
+  const [products, exchangeRates] = await Promise.all([
     prisma.product.findMany({
       where: { isActive: true },
       select: { id: true, name: true, sku: true, price: true },
-      orderBy: { name: "asc" },
-    }),
-    prisma.supplier.findMany({
-      select: { id: true, name: true, contact: true },
       orderBy: { name: "asc" },
     }),
     prisma.exchangeRate.findMany({
@@ -32,7 +28,6 @@ export default async function CreatePurchaseOrderPage() {
         ...p,
         price: Number(p.price),
       }))}
-      suppliers={suppliers}
       defaultExchangeRate={defaultRate ? Number(defaultRate.rate) : null}
     />
   );

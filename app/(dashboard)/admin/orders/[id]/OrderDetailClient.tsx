@@ -26,6 +26,7 @@ import {
   getOpenPurchaseOrders,
   addOrderItemsToPurchaseOrder,
 } from "@/actions/order.actions";
+import type { OrderItemStatusInfo } from "@/actions/order.actions";
 import { searchProductsForOrder } from "@/actions/product.actions";
 
 interface ProductSearchResult {
@@ -113,6 +114,7 @@ interface Props {
       };
     };
   }>;
+  itemStatuses: OrderItemStatusInfo[];
 }
 
 const statusColors: Record<string, string> = {
@@ -125,11 +127,37 @@ const statusColors: Record<string, string> = {
   AWAITING_STOCK: "bg-orange-100 text-orange-700",
 };
 
-export function OrderDetailClient({ order, preOrders }: Props) {
+// ─── Status display helpers ────────────────────────────
+const itemStatusColors: Record<string, string> = {
+  IN_STOCK: "bg-green-100 text-green-700",
+  IN_WAREHOUSE: "bg-blue-100 text-blue-700",
+  PURCHASED: "bg-purple-100 text-purple-700",
+  ORDERED: "bg-indigo-100 text-indigo-700",
+  AWAITING_STOCK: "bg-yellow-100 text-yellow-700",
+  CANCELLED: "bg-red-100 text-red-700",
+  RETURNED: "bg-orange-100 text-orange-700",
+  NO_STOCK: "bg-gray-100 text-gray-500",
+};
+
+const itemStatusLabels: Record<string, string> = {
+  IN_STOCK: "In Stock",
+  IN_WAREHOUSE: "In Warehouse",
+  PURCHASED: "Purchased",
+  ORDERED: "Ordered",
+  AWAITING_STOCK: "Awaiting Stock",
+  CANCELLED: "Cancelled",
+  RETURNED: "Returned",
+  NO_STOCK: "No Stock",
+};
+
+export function OrderDetailClient({ order, preOrders, itemStatuses }: Props) {
   const [copying, setCopying] = useState(false);
   const [status, setStatus] = useState(order.status);
   const [items, setItems] = useState<OrderItemData[]>(order.items);
   const [notes, setNotes] = useState(order.notes ?? "");
+
+  // Build status map
+  const statusMap = new Map(itemStatuses.map((s) => [s.itemId, s]));
   const [savingNotes, setSavingNotes] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
 
@@ -170,8 +198,7 @@ export function OrderDetailClient({ order, preOrders }: Props) {
 
   const fmtCurrency = (n: number) =>
     n.toLocaleString("en-US", {
-      style: "currency",
-      currency: "LKR",
+      style: "decimal",
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     });
@@ -299,20 +326,6 @@ export function OrderDetailClient({ order, preOrders }: Props) {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
-
-  // Fetch open POs when Send to PO dialog opens
-  useEffect(() => {
-    if (sendToPoItemId) {
-      getOpenPurchaseOrders().then((result) => {
-        if (result.success && result.data) {
-          setOpenPOs(result.data);
-          if (result.data.length > 0) {
-            setSelectedPOId(result.data[0].id);
-          }
-        }
-      });
-    }
-  }, [sendToPoItemId]);
 
   const handleAddProductToOrder = async (product: ProductSearchResult) => {
     const defaultCost = Number(product.buyingPrice ?? 0);
@@ -706,26 +719,26 @@ export function OrderDetailClient({ order, preOrders }: Props) {
                   <th className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider">
                     Name
                   </th>
+                  <th className="text-center px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider min-w-[90px]">
+                    Status
+                  </th>
                   <th className="text-center px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider min-w-[60px]">
                     QTY
                   </th>
                   <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider min-w-[100px]">
-                    Selling Price
+                    Selling
                   </th>
                   <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider min-w-[100px]">
-                    Competitor Price
+                    Competitor
                   </th>
                   <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider min-w-[100px]">
-                    Supplier Price (CNY)
+                    Supplier (CNY)
                   </th>
                   <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider min-w-[90px]">
-                    Base Price
+                    Base
                   </th>
                   <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider min-w-[100px]">
-                    Shipping (LKR)
-                  </th>
-                  <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider min-w-[100px]">
-                    Handler (LKR)
+                    S&H (LKR)
                   </th>
                   <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wider min-w-[90px]">
                     Total Costs
@@ -789,6 +802,24 @@ export function OrderDetailClient({ order, preOrders }: Props) {
                         </div>
                       </td>
 
+                      {/* Status */}
+                      <td className="px-3 py-3 text-center">
+                        {(() => {
+                          const si = statusMap.get(item.id);
+                          if (!si) return <span className="text-xs text-gray-400">—</span>;
+                          return (
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                itemStatusColors[si.status] ?? "bg-gray-100 text-gray-700"
+                              }`}
+                              title={si.detail ?? undefined}
+                            >
+                              {itemStatusLabels[si.status] ?? si.status}
+                            </span>
+                          );
+                        })()}
+                      </td>
+
                       {/* QTY — inline editable */}
                       <td className="px-3 py-3 text-center">
                         <input
@@ -843,14 +874,9 @@ export function OrderDetailClient({ order, preOrders }: Props) {
                         {fmtCurrency(v.basePrice)}
                       </td>
 
-                      {/* Shipping Cost (LKR) — from product × qty */}
+                      {/* Shipping & Handling (LKR) — (shipping + handler) × qty */}
                       <td className="px-3 py-3 text-right text-gray-900">
-                        {fmtCurrency(v.shippingCost * item.quantity)}
-                      </td>
-
-                      {/* Handler Cost (LKR) — from product × qty */}
-                      <td className="px-3 py-3 text-right text-gray-900">
-                        {fmtCurrency(v.handlerCost * item.quantity)}
+                        {fmtCurrency((v.shippingCost + v.handlerCost) * item.quantity)}
                       </td>
 
                       {/* Total Costs (base + shipping + handler) * qty */}
@@ -888,19 +914,27 @@ export function OrderDetailClient({ order, preOrders }: Props) {
                         {fmtCurrency(v.lineTotal)}
                       </td>
 
-                      {/* Send to PO action */}
+                      {/* Send to PO action (icon only) */}
                       <td className="px-3 py-3 text-center">
                         <button
-                          onClick={() => {
+                          onClick={async () => {
                             setSendToPoItemId(item.id);
                             setSendMode("existing");
                             setSelectedPOId("");
                             setNewPOSupplierName("");
+                            // Fetch open POs immediately so the dialog has them ready
+                            const result = await getOpenPurchaseOrders();
+                            if (result.success && result.data) {
+                              setOpenPOs(result.data);
+                              if (result.data.length > 0) {
+                                setSelectedPOId(result.data[0].id);
+                              }
+                            }
                           }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-gray-300 text-gray-500 bg-white hover:bg-brand hover:text-white hover:border-brand transition-colors"
+                          title="Send to Purchase Order"
                         >
-                          <Package className="h-3 w-3" />
-                          Send to PO
+                          <Package className="h-4 w-4" />
                         </button>
                       </td>
                     </tr>

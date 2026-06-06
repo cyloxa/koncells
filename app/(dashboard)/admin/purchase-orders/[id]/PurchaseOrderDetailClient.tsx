@@ -79,7 +79,6 @@ interface PurchaseOrder {
   poNumber: number;
   supplierName: string | null;
   supplierContact: string | null;
-  supplierId: string | null;
   status: string;
   totalCny: number;
   exchangeRate: number;
@@ -580,7 +579,7 @@ export function PurchaseOrderDetailClient({
               {po.shipments.slice(0, 3).map((s) => (
                 <Link
                   key={s.id}
-                  href={`/admin/warehouse/${s.id}`}
+                  href={`/admin/shipments/${s.id}`}
                   className="block text-sm text-brand hover:text-brand/80"
                 >
                   Shipment #{s.shipmentNumber}
@@ -913,7 +912,7 @@ export function PurchaseOrderDetailClient({
               <div key={shipment.id} className="p-4">
                 <div className="flex items-center justify-between mb-2">
                   <Link
-                    href={`/admin/warehouse/${shipment.id}`}
+                    href={`/admin/shipments/${shipment.id}`}
                     className="font-medium text-brand hover:text-brand/80"
                   >
                     Shipment #{shipment.shipmentNumber}

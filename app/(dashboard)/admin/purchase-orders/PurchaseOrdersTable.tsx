@@ -180,6 +180,11 @@ export function PurchaseOrdersTable({ initialOrders }: PurchaseOrdersTableProps)
                     <span className="font-mono text-sm font-medium text-brand hover:text-brand/80">
                       PO-{String(order.poNumber).padStart(4, "0")}
                     </span>
+                    {order.supplierName && (
+                      <span className="ml-2 text-sm text-gray-500">
+                        — {order.supplierName}
+                      </span>
+                    )}
                   </td>
                   <td className="py-3 px-4">
                     <span

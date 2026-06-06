@@ -308,7 +308,54 @@ export async function updateProduct(
 export async function deleteProduct(id: string): Promise<ActionResult<{ id: string }>> {
   try {
     await prisma.$transaction(async (tx) => {
+      // Find all PO items linked to this product
+      const poItemIds = (
+        await tx.purchaseOrderItem.findMany({
+          where: { productId: id },
+          select: { id: true },
+        })
+      ).map((i) => i.id);
+
+      // 1. Delete WarehousePackageItems linked to these PO items
+      if (poItemIds.length > 0) {
+        await tx.warehousePackageItem.deleteMany({
+          where: { purchaseOrderItemId: { in: poItemIds } },
+        });
+      }
+
+      // 2. Delete PreOrderItems linked to these PO items
+      if (poItemIds.length > 0) {
+        await tx.preOrderItem.deleteMany({
+          where: { purchaseOrderItemId: { in: poItemIds } },
+        });
+      }
+
+      // 3. Delete WarehouseInventoryItems for this product
+      await tx.warehouseInventoryItem.deleteMany({
+        where: { productId: id },
+      });
+
+      // 4. Delete PurchaseOrderItems for this product
+      await tx.purchaseOrderItem.deleteMany({
+        where: { productId: id },
+      });
+
+      // 5. Delete OrderItems for this product (skip those with preOrderItems still linked)
+      await tx.orderItem.deleteMany({
+        where: { productId: id },
+      });
+
+      // 6. Delete CartItems
       await tx.cartItem.deleteMany({ where: { productId: id } });
+
+      // 7. Delete RelatedProduct entries
+      await tx.relatedProduct.deleteMany({
+        where: {
+          OR: [{ productId: id }, { relatedProductId: id }],
+        },
+      });
+
+      // 8. Delete the product (cascades to ProductImage, Review)
       await tx.product.delete({ where: { id } });
     });
     revalidatePath("/admin/products");
@@ -341,7 +388,6 @@ const EXPORT_HEADER = [
   "isActive",
   "showPrice",
   "isFeatured",
-  "tags",
   "metaTitle",
   "metaDescription",
   "focusKeyphrase",
@@ -388,7 +434,6 @@ export async function exportProductsCsv(): Promise<ActionResult<string>> {
         isActive: p.isActive ? "true" : "false",
         showPrice: p.showPrice ? "true" : "false",
         isFeatured: p.isFeatured ? "true" : "false",
-        tags: p.tags ?? "",
         metaTitle: p.metaTitle ?? "",
         metaDescription: p.metaDescription ?? "",
         focusKeyphrase: p.focusKeyphrase ?? "",
@@ -439,7 +484,6 @@ const importProductCsvSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
-  tags: z.string().optional().default(""),
   metaTitle: z.string().optional().default(""),
   metaDescription: z.string().optional().default(""),
   focusKeyphrase: z.string().optional().default(""),
@@ -557,7 +601,6 @@ export async function importProductsCsv(
           brand: data.brand || null,
           model: data.model || null,
           condition: data.condition || null,
-          tags: data.tags || null,
           weight: data.weight ?? null,
           price: data.price,
           compareAtPrice: data.compareAtPrice ?? null,

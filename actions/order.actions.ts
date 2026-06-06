@@ -170,6 +170,77 @@ export async function getAllOrders() {
   });
 }
 
+export async function getAdminOrders() {
+  const session = await auth();
+  if (!session?.user?.id || session.user.role !== "ADMIN") throw new Error("Unauthorized");
+
+  const orders = await prisma.order.findMany({
+    include: {
+      user: { select: { name: true, email: true } },
+      items: {
+        include: {
+          product: { select: { name: true, shippingCost: true, handlerCost: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  // Count orders per date for sequential numbering
+  const dateCounts: Record<string, number> = {};
+  for (let i = orders.length - 1; i >= 0; i--) {
+    const dateKey = new Date(orders[i].createdAt).toISOString().slice(0, 10);
+    dateCounts[dateKey] = (dateCounts[dateKey] ?? 0) + 1;
+  }
+
+  // Assign sequential numbers in chronological order (oldest first)
+  const seqMap: Record<string, number> = {};
+  const currentCounts: Record<string, number> = {};
+  for (let i = orders.length - 1; i >= 0; i--) {
+    const order = orders[i];
+    const dateKey = new Date(order.createdAt).toISOString().slice(0, 10);
+    currentCounts[dateKey] = (currentCounts[dateKey] ?? 0) + 1;
+    seqMap[order.id] = currentCounts[dateKey];
+  }
+
+  return orders.map((order) => {
+    const d = new Date(order.createdAt);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yy = String(d.getFullYear()).slice(-2);
+    const orderName = `KONCELLS${dd}${mm}${yy}#${seqMap[order.id]}`;
+
+    let totalCosts = 0;
+    let totalProfit = 0;
+    for (const item of order.items) {
+      const qty = item.quantity;
+      const price = Number(item.price);
+      const baseCost = item.costs ? Number(item.costs) : 0;
+      const shipping = Number(item.product.shippingCost ?? 0);
+      const handler = Number(item.product.handlerCost ?? 0);
+      const discount = item.discount ? Number(item.discount) : 0;
+      const itemCost = (baseCost + shipping + handler) * qty;
+      const itemRevenue = price * qty - discount * qty;
+      totalCosts += itemCost;
+      totalProfit += itemRevenue - itemCost;
+    }
+
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      orderName,
+      createdAt: order.createdAt,
+      customerName: order.user.name,
+      customerEmail: order.user.email,
+      status: order.status,
+      total: Number(order.total),
+      totalCosts,
+      totalProfit,
+      itemCount: order.items.length,
+    };
+  });
+}
+
 export async function updateOrderStatus(id: string, status: string) {
   const session = await auth();
   if (!session?.user?.id || session.user.role !== "ADMIN") throw new Error("Unauthorized");
@@ -694,30 +765,6 @@ export async function addItemsToOrder(
   }
 }
 
-// ─── Bulk Delete Orders ────────────────────────────────
-
-export async function deleteOrders(
-  ids: string[]
-): Promise<ActionResult<{ count: number }>> {
-  const session = await auth();
-  if (session?.user?.role !== "ADMIN") return { success: false, error: "Unauthorized" };
-
-  if (ids.length === 0) return { success: false, error: "No orders selected" };
-
-  try {
-    // OrderItem has onDelete: Cascade from Order, so deleting Order cascades to items
-    await prisma.order.deleteMany({
-      where: { id: { in: ids } },
-    });
-
-    revalidatePath("/admin/orders");
-    return { success: true, data: { count: ids.length } };
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "Failed to delete orders";
-    return { success: false, error: message };
-  }
-}
-
 // ─── Pre-Order helpers ──────────────────────────────
 
 export async function getPreOrdersForOrder(orderId: string) {
@@ -771,172 +818,201 @@ export async function addOrderItemsToPurchaseOrder(
   if (orderItemIds.length === 0) return { success: false, error: "No order items selected" };
 
   try {
-    // Fetch all order items with product info
-    const orderItems = await prisma.orderItem.findMany({
-      where: { id: { in: orderItemIds } },
-      include: {
-        product: {
-          select: { id: true, name: true, sku: true, globalPrice: true },
+    const result = await prisma.$transaction(async (tx) => {
+      // Fetch all order items with product info
+      const orderItems = await tx.orderItem.findMany({
+        where: { id: { in: orderItemIds } },
+        include: {
+          product: {
+            select: { id: true, name: true, sku: true, globalPrice: true },
+          },
+          order: {
+            select: { id: true, status: true },
+          },
         },
-        order: {
-          select: { id: true, status: true },
-        },
-      },
-    });
-
-    if (orderItems.length === 0) return { success: false, error: "No order items found" };
-
-    // Get the default exchange rate (CNY to LKR)
-    const exchangeRate = await prisma.exchangeRate.findFirst({
-      where: { source: "CNY", target: "LKR", isDefault: true },
-      orderBy: { createdAt: "desc" },
-    });
-
-    if (!exchangeRate) return { success: false, error: "No CNY to LKR exchange rate configured" };
-
-    const rate = Number(exchangeRate.rate);
-
-    // Collect unique order IDs for status update
-    const orderIds = [...new Set(orderItems.map((oi) => oi.order.id))];
-
-    if (purchaseOrderId) {
-      // ── Add to existing PO ──────────────────────
-      const po = await prisma.purchaseOrder.findUnique({
-        where: { id: purchaseOrderId },
-        select: { exchangeRate: true },
       });
 
-      if (!po) return { success: false, error: "Purchase order not found" };
+      if (orderItems.length === 0) throw new Error("No order items found");
 
-      for (const orderItem of orderItems) {
-        const unitPriceCny = orderItem.product.globalPrice ? Number(orderItem.product.globalPrice) : 0;
-        const lineCny = unitPriceCny * orderItem.quantity;
-        const lineLkr = lineCny * rate;
+      // Get the default exchange rate (CNY to LKR)
+      const exchangeRate = await tx.exchangeRate.findFirst({
+        where: { source: "CNY", target: "LKR", isDefault: true },
+        orderBy: { createdAt: "desc" },
+      });
 
-        // Create PurchaseOrderItem
-        const poItem = await prisma.purchaseOrderItem.create({
-          data: {
-            purchaseOrderId,
-            productId: orderItem.product.id,
-            productName: orderItem.product.name,
-            productSku: orderItem.product.sku,
-            quantity: orderItem.quantity,
-            unitPriceCny,
-            lineTotalCny: lineCny,
-            lineTotalLkr: lineLkr,
-          },
+      if (!exchangeRate) throw new Error("No CNY to LKR exchange rate configured");
+
+      const rate = Number(exchangeRate.rate);
+
+      // Collect unique order IDs for status update
+      const orderIds = [...new Set(orderItems.map((oi) => oi.order.id))];
+
+      let resolvedPurchaseOrderId = purchaseOrderId;
+
+      if (purchaseOrderId) {
+        // ── Add to existing PO ──────────────────────
+        const po = await tx.purchaseOrder.findUnique({
+          where: { id: purchaseOrderId },
+          select: { exchangeRate: true, status: true },
         });
 
-        // Create PreOrderItem link
-        await prisma.preOrderItem.create({
-          data: {
-            orderItemId: orderItem.id,
-            purchaseOrderItemId: poItem.id,
-            quantity: orderItem.quantity,
-          },
-        });
-      }
+        if (!po) throw new Error("Purchase order not found");
 
-      // Recalculate PO totals
-      const allItems = await prisma.purchaseOrderItem.findMany({
-        where: { purchaseOrderId },
-      });
+        if (po.status !== "PENDING" && po.status !== "ORDERED") {
+          throw new Error(
+            `Cannot add items to a purchase order with status "${po.status}". Only PENDING or ORDERED purchase orders accept new items.`
+          );
+        }
 
-      const totalCny = allItems.reduce((sum, i) => sum + Number(i.lineTotalCny), 0);
-      const totalLkr = allItems.reduce((sum, i) => sum + Number(i.lineTotalLkr), 0);
-
-      await prisma.purchaseOrder.update({
-        where: { id: purchaseOrderId },
-        data: { totalCny, totalLkr },
-      });
-    } else {
-      // ── Create new PO ───────────────────────────
-      const poSupplierName = supplierName || "Ad-hoc Supplier";
-
-      // Build items data for the new PO
-      let totalCny = 0;
-      const itemRecords: Array<{
-        orderItem: (typeof orderItems)[number];
-        unitPriceCny: number;
-        lineCny: number;
-        lineLkr: number;
-      }> = [];
-
-      for (const orderItem of orderItems) {
-        const unitPriceCny = orderItem.product.globalPrice ? Number(orderItem.product.globalPrice) : 0;
-        const lineCny = unitPriceCny * orderItem.quantity;
-        const lineLkr = lineCny * rate;
-        totalCny += lineCny;
-        itemRecords.push({ orderItem, unitPriceCny, lineCny, lineLkr });
-      }
-
-      const po = await prisma.purchaseOrder.create({
-        data: {
-          supplierName: poSupplierName,
-          totalCny,
-          exchangeRate: rate,
-          totalLkr: totalCny * rate,
-          status: "PENDING",
-          items: {
-            create: itemRecords.map((r) => ({
-              productId: r.orderItem.product.id,
-              productName: r.orderItem.product.name,
-              productSku: r.orderItem.product.sku,
-              quantity: r.orderItem.quantity,
-              unitPriceCny: r.unitPriceCny,
-              lineTotalCny: r.lineCny,
-              lineTotalLkr: r.lineLkr,
-            })),
-          },
-        },
-      });
-
-      // Create PreOrderItem links for the newly created PO items
-      const poItems = await prisma.purchaseOrderItem.findMany({
-        where: { purchaseOrderId: po.id },
-      });
-
-      for (const poItem of poItems) {
-        const matching = itemRecords.find(
-          (r) => r.orderItem.product.id === poItem.productId && r.unitPriceCny === Number(poItem.unitPriceCny)
+        // Check for duplicate products already on this PO
+        const existingProductIds = new Set(
+          (await tx.purchaseOrderItem.findMany({
+            where: { purchaseOrderId },
+            select: { productId: true },
+          })).map((i) => i.productId)
         );
-        if (matching) {
-          await prisma.preOrderItem.create({
+
+        for (const orderItem of orderItems) {
+          if (existingProductIds.has(orderItem.product.id)) {
+            throw new Error(
+              `Product "${orderItem.product.name}" is already on this PO. Remove the existing PO item first or update its quantity.`
+            );
+          }
+        }
+
+        for (const orderItem of orderItems) {
+          const unitPriceCny = orderItem.product.globalPrice ? Number(orderItem.product.globalPrice) : 0;
+          const lineCny = unitPriceCny * orderItem.quantity;
+          const lineLkr = lineCny * rate;
+
+          const poItem = await tx.purchaseOrderItem.create({
             data: {
-              orderItemId: matching.orderItem.id,
-              purchaseOrderItemId: poItem.id,
-              quantity: matching.orderItem.quantity,
+              purchaseOrderId,
+              productId: orderItem.product.id,
+              productName: orderItem.product.name,
+              productSku: orderItem.product.sku,
+              quantity: orderItem.quantity,
+              unitPriceCny,
+              lineTotalCny: lineCny,
+              lineTotalLkr: lineLkr,
             },
+          });
+
+          await tx.preOrderItem.create({
+            data: {
+              orderItemId: orderItem.id,
+              purchaseOrderItemId: poItem.id,
+              quantity: orderItem.quantity,
+            },
+          });
+        }
+
+        // Recalculate PO totals
+        const allItems = await tx.purchaseOrderItem.findMany({
+          where: { purchaseOrderId },
+        });
+
+        const totalCny = allItems.reduce((sum, i) => sum + Number(i.lineTotalCny), 0);
+        const totalLkr = allItems.reduce((sum, i) => sum + Number(i.lineTotalLkr), 0);
+
+        await tx.purchaseOrder.update({
+          where: { id: purchaseOrderId },
+          data: { totalCny, totalLkr },
+        });
+      } else {
+        // ── Create new PO ───────────────────────────
+        const poSupplierName = supplierName || "Ad-hoc Supplier";
+
+        let totalCny = 0;
+        const itemRecords: Array<{
+          orderItem: (typeof orderItems)[number];
+          unitPriceCny: number;
+          lineCny: number;
+          lineLkr: number;
+        }> = [];
+
+        for (const orderItem of orderItems) {
+          const unitPriceCny = orderItem.product.globalPrice ? Number(orderItem.product.globalPrice) : 0;
+          const lineCny = unitPriceCny * orderItem.quantity;
+          const lineLkr = lineCny * rate;
+          totalCny += lineCny;
+          itemRecords.push({ orderItem, unitPriceCny, lineCny, lineLkr });
+        }
+
+        const po = await tx.purchaseOrder.create({
+          data: {
+            supplierName: poSupplierName,
+            totalCny,
+            exchangeRate: rate,
+            totalLkr: totalCny * rate,
+            status: "PENDING",
+            items: {
+              create: itemRecords.map((r) => ({
+                productId: r.orderItem.product.id,
+                productName: r.orderItem.product.name,
+                productSku: r.orderItem.product.sku,
+                quantity: r.orderItem.quantity,
+                unitPriceCny: r.unitPriceCny,
+                lineTotalCny: r.lineCny,
+                lineTotalLkr: r.lineLkr,
+              })),
+            },
+          },
+        });
+
+        const poItems = await tx.purchaseOrderItem.findMany({
+          where: { purchaseOrderId: po.id },
+        });
+
+        for (const poItem of poItems) {
+          const matching = itemRecords.find(
+            (r) => r.orderItem.product.id === poItem.productId && r.unitPriceCny === Number(poItem.unitPriceCny)
+          );
+          if (matching) {
+            await tx.preOrderItem.create({
+              data: {
+                orderItemId: matching.orderItem.id,
+                purchaseOrderItemId: poItem.id,
+                quantity: matching.orderItem.quantity,
+              },
+            });
+          }
+        }
+
+        resolvedPurchaseOrderId = po.id;
+      }
+
+      // Update order status to AWAITING_STOCK for eligible orders
+      const eligibleStatuses: string[] = ["PENDING", "PROCESSING"];
+      for (const orderId of orderIds) {
+        const order = await tx.order.findUnique({
+          where: { id: orderId },
+          select: { status: true },
+        });
+        if (order && eligibleStatuses.includes(order.status)) {
+          await tx.order.update({
+            where: { id: orderId },
+            data: { status: "AWAITING_STOCK" },
           });
         }
       }
 
-      purchaseOrderId = po.id;
-    }
-
-    // Update order status to AWAITING_STOCK for eligible orders
-    const eligibleStatuses: string[] = ["PENDING", "PROCESSING"];
-    for (const orderId of orderIds) {
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        select: { status: true },
-      });
-      if (order && eligibleStatuses.includes(order.status)) {
-        await prisma.order.update({
-          where: { id: orderId },
-          data: { status: "AWAITING_STOCK" },
-        });
-      }
-    }
+      return resolvedPurchaseOrderId!;
+    });
 
     revalidatePath("/admin/purchase-orders");
-    if (purchaseOrderId) revalidatePath(`/admin/purchase-orders/${purchaseOrderId}`);
+    if (result) revalidatePath(`/admin/purchase-orders/${result}`);
     revalidatePath("/admin/orders");
+    const orderItems = await prisma.orderItem.findMany({
+      where: { id: { in: orderItemIds } },
+      select: { orderId: true },
+    });
+    const orderIds = [...new Set(orderItems.map((oi) => oi.orderId))];
     for (const orderId of orderIds) {
       revalidatePath(`/admin/orders/${orderId}`);
     }
 
-    return { success: true, data: { purchaseOrderId } };
+    return { success: true, data: { purchaseOrderId: result } };
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Failed to add items to purchase order";
     return { success: false, error: message };
@@ -969,5 +1045,161 @@ export async function getOpenPurchaseOrders(): Promise<
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Failed to fetch purchase orders";
     return { success: false, error: message };
+  }
+}
+
+// ─── Get Order Item Product Statuses ──────────────────
+
+export interface OrderItemStatusInfo {
+  itemId: string;
+  status: string;
+  detail: string | null;
+}
+
+export async function getOrderItemStatuses(
+  orderId: string
+): Promise<OrderItemStatusInfo[]> {
+  const session = await auth();
+  if (session?.user?.role !== "ADMIN") return [];
+
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: { id: true, name: true, stock: true },
+            },
+            preOrderItems: {
+              include: {
+                purchaseOrderItem: {
+                  select: {
+                    id: true,
+                    purchaseOrderId: true,
+                    quantity: true,
+                    quantityReceived: true,
+                    status: true,
+                    purchaseOrder: {
+                      select: { status: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!order) return [];
+
+    // For each item, also look up warehouse inventory for the product
+    const productIds = order.items.map((item) => item.product.id);
+    const warehouseItems = await prisma.warehouseInventoryItem.groupBy({
+      by: ["productId"],
+      where: {
+        productId: { in: productIds },
+        status: "IN_WAREHOUSE",
+      },
+      _sum: { quantity: true },
+    });
+
+    const warehouseQtys = new Map(
+      warehouseItems.map((w) => [w.productId, w._sum.quantity ?? 0])
+    );
+
+    const statuses: OrderItemStatusInfo[] = order.items.map((item) => {
+      const warehouseQty = warehouseQtys.get(item.product.id) ?? 0;
+
+      // 1. Check product stock
+      if (item.product.stock > 0) {
+        return {
+          itemId: item.id,
+          status: "IN_STOCK",
+          detail: `Stock: ${item.product.stock}`,
+        };
+      }
+
+      // 2. Check warehouse inventory
+      if (warehouseQty > 0) {
+        return {
+          itemId: item.id,
+          status: "IN_WAREHOUSE",
+          detail: `Warehouse: ${warehouseQty}`,
+        };
+      }
+
+      // 3. Check pre-order / purchase order status
+      // An OrderItem may now have multiple PreOrderItems (split across POs).
+      // Aggregate to show the most favorable status.
+      const preOrderItems = (item as any).preOrderItems as Array<{
+        purchaseOrderItem: {
+          status: string;
+          purchaseOrderId: string;
+          purchaseOrder: { status: string };
+        };
+      }> | undefined;
+
+      if (preOrderItems && preOrderItems.length > 0) {
+        // Determine the "best" status across all pre-orders for this item
+        const statusPriority: Record<string, number> = {
+          IN_WAREHOUSE: 4,
+          PURCHASED: 3,
+          ORDERED: 2,
+          PENDING: 1,
+          CANCELLED: 0,
+          RETURNED: 0,
+        };
+
+        let bestStatus = "";
+        let bestPoId = "";
+        let bestPriority = -1;
+
+        for (const preOrder of preOrderItems) {
+          const poItemStatus = preOrder.purchaseOrderItem.status;
+          const poStatus = preOrder.purchaseOrderItem.purchaseOrder.status;
+          const effectiveStatus =
+            poItemStatus === "PENDING" && poStatus === "ORDERED" ? "ORDERED" : poItemStatus;
+
+          const priority = statusPriority[effectiveStatus] ?? -1;
+          if (priority > bestPriority) {
+            bestPriority = priority;
+            bestStatus = effectiveStatus;
+            bestPoId = preOrder.purchaseOrderItem.purchaseOrderId;
+          }
+        }
+
+        switch (bestStatus) {
+          case "IN_WAREHOUSE":
+            return {
+              itemId: item.id,
+              status: "IN_WAREHOUSE",
+              detail: `Warehouse (PO)`,
+            };
+          case "PURCHASED":
+            return {
+              itemId: item.id,
+              status: "PURCHASED",
+              detail: `PO #${bestPoId.slice(0, 8)}`,
+            };
+          case "ORDERED":
+            return { itemId: item.id, status: "ORDERED", detail: "PO Ordered" };
+          case "CANCELLED":
+            return { itemId: item.id, status: "CANCELLED", detail: "PO Cancelled" };
+          case "RETURNED":
+            return { itemId: item.id, status: "RETURNED", detail: "Returned to Supplier" };
+          default:
+            return { itemId: item.id, status: "AWAITING_STOCK", detail: "PO Pending" };
+        }
+      }
+
+      // 4. No stock, no PO, no warehouse
+      return { itemId: item.id, status: "NO_STOCK", detail: null };
+    });
+
+    return statuses;
+  } catch {
+    return [];
   }
 }

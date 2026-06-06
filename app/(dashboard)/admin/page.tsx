@@ -222,7 +222,7 @@ export default async function AdminPage() {
         ))}
       </div>
 
-      {/* Supplier & Warehouse Quick Stats */}
+      {/* Quick Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         <Link href="/admin/pre-orders" className="block">
           <div className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow">

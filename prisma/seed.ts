@@ -14,8 +14,8 @@ async function main() {
   await prisma.preOrderItem.deleteMany();
   await prisma.purchaseOrderItem.deleteMany();
   await prisma.purchaseOrder.deleteMany();
-  await prisma.supplierProduct.deleteMany();
-  await prisma.supplier.deleteMany();
+  await prisma.purchaseOrderItem.deleteMany();
+  await prisma.purchaseOrder.deleteMany();
   await prisma.relatedProduct.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
@@ -827,125 +827,6 @@ async function main() {
 
   console.log("✅ 6 sample orders created");
 
-  // ─── Suppliers ──────────────────────────────────────
-  const shenzhenTech = await prisma.supplier.create({
-    data: {
-      name: "Shenzhen Tech Electronics Co.",
-      contact: "Mr. Li Wei, +86 755 8288 9000",
-      email: "liwei@shenzhentech.cn",
-      address: "12 Huaqiangbei Road, Futian District, Shenzhen, Guangdong, China",
-      paymentTerms: "30% deposit, 70% before shipment. T/T",
-      leadTimeDays: 25,
-      notes: "Preferred supplier for audio equipment and consumer electronics. Minimum order: 100 units.",
-    },
-  });
-
-  const guangzhouTextile = await prisma.supplier.create({
-    data: {
-      name: "Guangzhou Textile Imports Ltd.",
-      contact: "Ms. Zhang Mei, +86 20 8765 4321",
-      email: "mei.zhang@gztextile.cn",
-      address: "88 Zhongshan Avenue, Tianhe District, Guangzhou, Guangdong, China",
-      paymentTerms: "50% deposit, 50% on delivery. L/C accepted.",
-      leadTimeDays: 35,
-      notes: "Cotton and wool garments specialist. Good quality, consistent lead times.",
-    },
-  });
-
-  const yiwuHomeGoods = await prisma.supplier.create({
-    data: {
-      name: "Yiwu Home & Decor Supply Co.",
-      contact: "Mr. Wang Dong, +86 579 8555 1212",
-      email: "wangdong@yiwuhome.cn",
-      address: "3 Futian Road, Yiwu, Zhejiang, China",
-      paymentTerms: "100% T/T before shipment. First order only.",
-      leadTimeDays: 20,
-      notes: "Ceramics, textiles, home decor. Good for small batch orders.",
-    },
-  });
-
-  console.log("✅ 3 suppliers created");
-
-  // ─── Supplier-Product Links ─────────────────────────
-  await prisma.supplierProduct.create({
-    data: {
-      supplierId: shenzhenTech.id,
-      productId: allProductsForOrder[0].id, // Headphones
-      priceCny: 210.00,
-      isPreferred: true,
-    },
-  });
-  await prisma.supplierProduct.create({
-    data: {
-      supplierId: shenzhenTech.id,
-      productId: allProductsForOrder[1].id, // Monitor
-      priceCny: 950.00,
-      isPreferred: true,
-    },
-  });
-  await prisma.supplierProduct.create({
-    data: {
-      supplierId: shenzhenTech.id,
-      productId: allProductsForOrder[2].id, // Keyboard
-      priceCny: 85.00,
-      isPreferred: false,
-    },
-  });
-  await prisma.supplierProduct.create({
-    data: {
-      supplierId: shenzhenTech.id,
-      productId: allProductsForOrder[3].id, // Speaker
-      priceCny: 55.00,
-    },
-  });
-  await prisma.supplierProduct.create({
-    data: {
-      supplierId: guangzhouTextile.id,
-      productId: allProductsForOrder[4].id, // Oxford Shirt
-      priceCny: 45.00,
-      isPreferred: true,
-    },
-  });
-  await prisma.supplierProduct.create({
-    data: {
-      supplierId: guangzhouTextile.id,
-      productId: allProductsForOrder[5].id, // Chinos
-      priceCny: 60.00,
-      isPreferred: true,
-    },
-  });
-  await prisma.supplierProduct.create({
-    data: {
-      supplierId: guangzhouTextile.id,
-      productId: allProductsForOrder[6].id, // Sweater
-      priceCny: 85.00,
-    },
-  });
-  await prisma.supplierProduct.create({
-    data: {
-      supplierId: yiwuHomeGoods.id,
-      productId: allProductsForOrder[7].id, // Table Lamp
-      priceCny: 105.00,
-      isPreferred: true,
-    },
-  });
-  await prisma.supplierProduct.create({
-    data: {
-      supplierId: yiwuHomeGoods.id,
-      productId: allProductsForOrder[8].id, // Throw Blanket
-      priceCny: 40.00,
-    },
-  });
-  await prisma.supplierProduct.create({
-    data: {
-      supplierId: yiwuHomeGoods.id,
-      productId: allProductsForOrder[9].id, // Candle Trio
-      priceCny: 28.00,
-    },
-  });
-
-  console.log("✅ 10 supplier-product links created");
-
   // ─── Purchase Orders ────────────────────────────────
   const exchangeRateCny = await prisma.exchangeRate.findFirst({
     where: { source: "CNY", target: "LKR", isDefault: true },
@@ -955,9 +836,8 @@ async function main() {
   // PO 1: Shenzhen Tech — ORDERED, 3 items (headphones, monitors, speakers)
   const po1 = await prisma.purchaseOrder.create({
     data: {
-      supplierId: shenzhenTech.id,
-      supplierName: shenzhenTech.name,
-      supplierContact: shenzhenTech.contact,
+      supplierName: "Shenzhen Tech Electronics Co.",
+      supplierContact: "Mr. Li Wei, +86 755 8288 9000",
       status: "ORDERED",
       totalCny: 0, // will recalc
       exchangeRate: rateCny,
@@ -1000,8 +880,7 @@ async function main() {
   // PO 2: Guangzhou Textile — PENDING, 2 items
   const po2 = await prisma.purchaseOrder.create({
     data: {
-      supplierId: guangzhouTextile.id,
-      supplierName: guangzhouTextile.name,
+      supplierName: "Guangzhou Textile Imports Ltd.",
       status: "PENDING",
       totalCny: 0,
       exchangeRate: rateCny,
@@ -1040,8 +919,7 @@ async function main() {
   // PO 3: Yiwu Home — PARTIAL, 1 item (lamp, 20 received of 40)
   const po3 = await prisma.purchaseOrder.create({
     data: {
-      supplierId: yiwuHomeGoods.id,
-      supplierName: yiwuHomeGoods.name,
+      supplierName: "Yiwu Home & Decor Supply Co.",
       status: "PARTIAL",
       totalCny: 0,
       exchangeRate: rateCny,
@@ -1075,8 +953,7 @@ async function main() {
   // PO 4: Shenzhen Tech — RECEIVED, completed
   const po4 = await prisma.purchaseOrder.create({
     data: {
-      supplierId: shenzhenTech.id,
-      supplierName: shenzhenTech.name,
+      supplierName: "Shenzhen Tech Electronics Co.",
       status: "RECEIVED",
       totalCny: 0,
       exchangeRate: rateCny,
@@ -1347,8 +1224,7 @@ async function main() {
   console.log("   Reviews:           10 (5 + 5 additional)");
   console.log("   Orders:            6 (DELIVERED, PROCESSING, PENDING, AWAITING_STOCK, CANCELLED, PREORDER)");
   console.log("   Addresses:         4");
-  console.log("   Suppliers:         3 (Shenzhen, Guangzhou, Yiwu)");
-  console.log("   Supplier Products: 10");
+  console.log("   Purchase Orders:   4");
   console.log("   Purchase Orders:   4 (ORDERED, PENDING, PARTIAL, RECEIVED)");
   console.log("   Pre-Order Items:   2");
   console.log("   Warehouse Ships:   3 (DELIVERED × 2, IN_TRANSIT × 1)");

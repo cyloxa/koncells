@@ -8,47 +8,6 @@ import { escapeCsvField, parseCsvLine } from "@/lib/csv";
 
 type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
-// ─── Users ─────────────────────────────────────────────
-
-export async function getUsers() {
-  const session = await auth();
-  if (session?.user?.role !== "ADMIN") throw new Error("Unauthorized");
-
-  return prisma.user.findMany({
-    include: {
-      _count: { select: { orders: true, reviews: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-}
-
-const updateUserRoleSchema = z.object({
-  userId: z.string(),
-  role: z.enum(["USER", "ADMIN"]),
-});
-
-export async function updateUserRole(
-  input: z.infer<typeof updateUserRoleSchema>
-): Promise<ActionResult<{ id: string; name: string | null; role: string }>> {
-  const session = await auth();
-  if (session?.user?.role !== "ADMIN") return { success: false, error: "Unauthorized" };
-
-  const parsed = updateUserRoleSchema.safeParse(input);
-  if (!parsed.success) return { success: false, error: "Invalid input" };
-
-  try {
-    const user = await prisma.user.update({
-      where: { id: parsed.data.userId },
-      data: { role: parsed.data.role },
-      select: { id: true, name: true, role: true },
-    });
-    revalidatePath("/admin/customers");
-    return { success: true, data: user };
-  } catch {
-    return { success: false, error: "Failed to update user role." };
-  }
-}
-
 // ─── Categories ────────────────────────────────────────
 
 const categorySchema = z.object({

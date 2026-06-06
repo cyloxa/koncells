@@ -33,9 +33,6 @@ export const profileSchema = z.object({
 
 export type ProfileInput = z.infer<typeof profileSchema>;
 
-export type LoginInput = z.infer<typeof loginSchema>;
-export type RegisterInput = z.infer<typeof registerSchema>;
-
 // ─── Product ──────────────────────────────────────────
 
 export const productSchema = z.object({
@@ -80,13 +77,6 @@ export const productSchema = z.object({
 
 export type ProductInput = z.infer<typeof productSchema>;
 
-export interface ProductImageInput {
-  url: string;
-  alt?: string | null;
-  title?: string | null;
-  position: number;
-}
-
 // ─── Category ─────────────────────────────────────────
 
 export const categorySchema = z.object({
@@ -97,51 +87,6 @@ export const categorySchema = z.object({
   parentId: z.string().optional().nullable(),
 });
 
-export type CategoryInput = z.infer<typeof categorySchema>;
-
-// ─── Address ──────────────────────────────────────────
-
-export const addressSchema = z.object({
-  label: z.string().optional(),
-  line1: z.string().min(1, "Address line 1 is required"),
-  line2: z.string().optional(),
-  city: z.string().min(1, "City is required"),
-  state: z.string().optional(),
-  postalCode: z.string().min(1, "Postal code is required"),
-  country: z.string().min(1, "Country is required"),
-  isDefault: z.boolean().default(false),
-});
-
-export type AddressInput = z.infer<typeof addressSchema>;
-
-// ─── Review ───────────────────────────────────────────
-
-export const reviewSchema = z.object({
-  rating: z.number().int().min(1).max(5),
-  title: z.string().optional(),
-  comment: z.string().optional(),
-});
-
-export type ReviewInput = z.infer<typeof reviewSchema>;
-
-// ─── Cart ─────────────────────────────────────────────
-
-export const cartItemSchema = z.object({
-  productId: z.string(),
-  quantity: z.number().int().min(1),
-});
-
-export type CartItemInput = z.infer<typeof cartItemSchema>;
-
-// ─── Checkout ─────────────────────────────────────────
-
-export const checkoutSchema = z.object({
-  addressId: z.string().min(1, "Shipping address is required"),
-  paymentMethodId: z.string().optional(),
-});
-
-export type CheckoutInput = z.infer<typeof checkoutSchema>;
-
 // ─── Shared DTOs ──────────────────────────────────────
 
 export interface ProductWithRelations {
@@ -151,7 +96,6 @@ export interface ProductWithRelations {
   description: string;
   brand: string | null;
   model: string | null;
-  tags: string | null;
   weight: number | null;
   price: number;
   compareAtPrice: number | null;
@@ -202,47 +146,6 @@ export interface ProductWithRelations {
   };
 }
 
-export interface CartWithItems {
-  id: string;
-  userId: string;
-  items: {
-    id: string;
-    quantity: number;
-    product: {
-      id: string;
-      name: string;
-      slug: string;
-      price: number;
-      images: { url: string; alt: string | null }[];
-      stock: number;
-    };
-  }[];
-}
-
-export interface OrderWithItems {
-  id: string;
-  userId: string;
-  status: string;
-  subtotal: number;
-  shippingCost: number;
-  tax: number;
-  total: number;
-  stripePaymentIntentId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  items: {
-    id: string;
-    quantity: number;
-    price: number;
-    product: {
-      id: string;
-      name: string;
-      slug: string;
-      images: { url: string; alt: string | null }[];
-    };
-  }[];
-}
-
 // ─── NextAuth type extension ──────────────────────────
 
 declare module "next-auth" {
@@ -267,15 +170,13 @@ declare module "next-auth/jwt" {
   }
 }
 
-// ─── Supplier & Warehouse ―――――――――――――――――――――――
+// ─── Purchase Order Types ―――――――――――――――――――――――
 
 export interface PurchaseOrderWithRelations {
   id: string;
   poNumber: number;
   supplierName: string | null;
   supplierContact: string | null;
-  supplierId: string | null;
-  supplier?: { id: string; name: string; } | null;
   status: string;
   totalCny: number;
   exchangeRate: number;
@@ -396,47 +297,4 @@ export interface WarehousePackageWithItems {
       productId: string;
     };
   }[];
-}
-
-// ─── Supplier Types ―――――――――――――――――――――――
-
-export interface SupplierWithRelations {
-  id: string;
-  name: string;
-  contact: string | null;
-  email: string | null;
-  address: string | null;
-  paymentTerms: string | null;
-  leadTimeDays: number | null;
-  notes: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  purchaseOrders?: {
-    id: string;
-    poNumber: number;
-    status: string;
-    totalCny: number;
-    totalLkr: number;
-    createdAt: Date;
-  }[];
-  products?: SupplierProductWithRelations[];
-}
-
-export interface SupplierProductWithRelations {
-  id: string;
-  supplierId: string;
-  productId: string;
-  priceCny: number;
-  isPreferred: boolean;
-  createdAt: Date;
-  supplier?: {
-    id: string;
-    name: string;
-  };
-  product?: {
-    id: string;
-    name: string;
-    sku: string;
-    slug: string;
-  };
 }

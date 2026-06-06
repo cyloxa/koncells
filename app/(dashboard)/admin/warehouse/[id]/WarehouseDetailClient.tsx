@@ -4,19 +4,30 @@ import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { ArrowLeft, Loader2, Package, Truck, CheckCircle, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Loader2,
+  Package,
+  Truck,
+  CheckCircle,
+  Plus,
+  Trash2,
+  ExternalLink,
+} from "lucide-react";
 
-interface POItemInfo {
+interface WarehouseInventoryItemDisplay {
   id: string;
   productName: string;
-  productSku: string;
   productId: string;
   quantity: number;
-  quantityReceived: number;
+  weight: number | null;
+  status: string;
   product: {
+    id: string;
     name: string;
     slug: string;
     weight: number | null;
+    images: { url: string; alt: string | null; position: number }[];
   } | null;
 }
 
@@ -39,6 +50,7 @@ interface WarehousePackage {
 
 interface Shipment {
   id: string;
+  name: string | null;
   shipmentNumber: number;
   status: string;
   totalWeight: number | null;
@@ -56,6 +68,7 @@ interface Shipment {
     supplierName: string | null;
     status: string;
   };
+  inventoryItems: WarehouseInventoryItemDisplay[];
   packages: WarehousePackage[];
 }
 
@@ -88,7 +101,9 @@ export function WarehouseDetailClient({
     async (newStatus: string) => {
       setIsUpdatingStatus(true);
       try {
-        const { updateShipmentStatus } = await import("@/actions/warehouse.actions");
+        const { updateShipmentStatus } = await import(
+          "@/actions/warehouse.actions"
+        );
         const result = await updateShipmentStatus({
           warehouseShipmentId: shipment.id,
           status: newStatus as any,
@@ -100,7 +115,9 @@ export function WarehouseDetailClient({
         setShipment((prev) => ({ ...prev, status: newStatus }));
         router.refresh();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to update status");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to update status"
+        );
       } finally {
         setIsUpdatingStatus(false);
       }
@@ -132,24 +149,32 @@ export function WarehouseDetailClient({
       {/* Header */}
       <div className="mb-6">
         <Link
-          href="/admin/warehouse"
+          href="/admin/shipments"
           className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 mb-2"
         >
           <ArrowLeft className="h-4 w-4 mr-1" />
-          Back to Warehouse
+          Back to Shipments
         </Link>
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
-              Shipment #{shipment.shipmentNumber}
+              {shipment.name
+                ? shipment.name
+                : `Shipment #${shipment.shipmentNumber}`}
             </h1>
+            {shipment.name && (
+              <p className="text-sm text-gray-500 mt-0.5">
+                Shipment #{shipment.shipmentNumber}
+              </p>
+            )}
             <p className="text-gray-600 text-sm mt-1">
               From{" "}
               <Link
                 href={`/admin/purchase-orders/${shipment.purchaseOrder.id}`}
                 className="text-brand hover:text-brand/80"
               >
-                PO-{String(shipment.purchaseOrder.poNumber).padStart(4, "0")}
+                PO-
+                {String(shipment.purchaseOrder.poNumber).padStart(4, "0")}
               </Link>{" "}
               ({shipment.purchaseOrder.supplierName ?? "N/A"})
               &middot; Created{" "}
@@ -177,13 +202,17 @@ export function WarehouseDetailClient({
       {nextStatus && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">Actions:</span>
+            <span className="text-sm font-medium text-gray-700">
+              Actions:
+            </span>
             <button
               onClick={() => handleStatusChange(nextStatus)}
               disabled={isUpdatingStatus}
               className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-brand rounded-lg hover:opacity-90 transition-all disabled:opacity-50"
             >
-              {isUpdatingStatus && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+              {isUpdatingStatus && (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              )}
               Mark as {nextStatus.replace(/_/g, " ")}
             </button>
           </div>
@@ -193,30 +222,130 @@ export function WarehouseDetailClient({
       {isTerminal && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
           <p className="text-sm text-green-800">
-            This shipment has been delivered. Stock has been updated and any linked pre-orders
-            have been fulfilled.
+            This shipment has been delivered. Stock has been updated and any
+            linked pre-orders have been fulfilled.
           </p>
         </div>
       )}
 
       {/* Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Packages</h2>
-          <p className="text-3xl font-bold text-gray-900">{shipment.packages.length}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Total Weight</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Items</h2>
           <p className="text-3xl font-bold text-gray-900">
-            {shipment.totalWeight ? `${shipment.totalWeight.toFixed(2)} kg` : "-"}
+            {shipment.inventoryItems.length}
           </p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Shipping Cost</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">
+            Packages
+          </h2>
           <p className="text-3xl font-bold text-gray-900">
-            {shipment.totalShippingCost ? fmtLkr(shipment.totalShippingCost) : "-"}
+            {shipment.packages.length}
           </p>
         </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">
+            Total Weight
+          </h2>
+          <p className="text-3xl font-bold text-gray-900">
+            {shipment.totalWeight
+              ? `${shipment.totalWeight.toFixed(2)} kg`
+              : "-"}
+          </p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">
+            Shipping Cost
+          </h2>
+          <p className="text-3xl font-bold text-gray-900">
+            {shipment.totalShippingCost
+              ? fmtLkr(shipment.totalShippingCost)
+              : "-"}
+          </p>
+        </div>
+      </div>
+
+      {/* Inventory Items Section */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">
+            Inventory Items
+          </h2>
+        </div>
+        {shipment.inventoryItems.length === 0 ? (
+          <div className="p-6 text-center text-sm text-gray-500">
+            No inventory items assigned to this shipment. Assign items from
+            the{" "}
+            <Link
+              href="/admin/warehouse/inventory"
+              className="text-brand hover:text-brand/80"
+            >
+              Inventory page
+            </Link>
+            .
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="text-left py-2 px-4 font-medium text-gray-500">
+                    Product
+                  </th>
+                  <th className="text-right py-2 px-4 font-medium text-gray-500">
+                    Qty
+                  </th>
+                  <th className="text-right py-2 px-4 font-medium text-gray-500">
+                    Weight
+                  </th>
+                  <th className="text-right py-2 px-4 font-medium text-gray-500">
+                    PO
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {shipment.inventoryItems.map((item) => (
+                  <tr key={item.id} className="hover:bg-gray-50">
+                    <td className="py-2 px-4">
+                      <div className="flex items-center gap-2">
+                        {item.product?.images[0] && (
+                          <img
+                            src={item.product.images[0].url}
+                            alt={item.productName}
+                            className="w-8 h-8 rounded object-cover"
+                          />
+                        )}
+                        <span className="font-medium text-gray-900">
+                          {item.productName}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2 px-4 text-right text-gray-900">
+                      {item.quantity}
+                    </td>
+                    <td className="py-2 px-4 text-right text-gray-500">
+                      {item.weight ? `${item.weight.toFixed(2)} kg` : "-"}
+                    </td>
+                    <td className="py-2 px-4 text-right">
+                      <Link
+                        href={`/admin/purchase-orders/${shipment.purchaseOrder.id}`}
+                        className="inline-flex items-center gap-1 text-brand hover:text-brand/80 text-xs"
+                      >
+                        PO-
+                        {String(shipment.purchaseOrder.poNumber).padStart(
+                          4,
+                          "0"
+                        )}
+                        <ExternalLink size={10} />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Packages Section */}
@@ -236,7 +365,9 @@ export function WarehouseDetailClient({
                   <h3 className="font-medium text-gray-900">
                     Package #{idx + 1}
                   </h3>
-                  <span className="text-sm text-gray-500">{pkg.weight.toFixed(2)} kg</span>
+                  <span className="text-sm text-gray-500">
+                    {pkg.weight.toFixed(2)} kg
+                  </span>
                 </div>
                 {pkg.notes && (
                   <p className="text-xs text-gray-500 mb-2">{pkg.notes}</p>
@@ -244,9 +375,15 @@ export function WarehouseDetailClient({
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-gray-100">
-                      <th className="text-left py-1 font-medium text-gray-500">Product</th>
-                      <th className="text-right py-1 font-medium text-gray-500">SKU</th>
-                      <th className="text-right py-1 font-medium text-gray-500">Qty</th>
+                      <th className="text-left py-1 font-medium text-gray-500">
+                        Product
+                      </th>
+                      <th className="text-right py-1 font-medium text-gray-500">
+                        SKU
+                      </th>
+                      <th className="text-right py-1 font-medium text-gray-500">
+                        Qty
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -258,7 +395,9 @@ export function WarehouseDetailClient({
                         <td className="py-1 text-right text-gray-500 font-mono">
                           {item.purchaseOrderItem.productSku}
                         </td>
-                        <td className="py-1 text-right text-gray-900">{item.quantity}</td>
+                        <td className="py-1 text-right text-gray-900">
+                          {item.quantity}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

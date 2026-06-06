@@ -26,7 +26,7 @@ const customerSchema = z.object({
     .nullable(),
 });
 
-export type CustomerInput = z.infer<typeof customerSchema>;
+type CustomerInput = z.infer<typeof customerSchema>;
 
 // ─── Search ─────────────────────────────────────────────
 

@@ -35,7 +35,8 @@ const updateStatusSchema = z.object({
 });
 
 export async function createWarehouseShipment(
-  purchaseOrderId: string
+  purchaseOrderId: string,
+  name?: string | null
 ): Promise<ActionResult<{ id: string; shipmentNumber: number }>> {
   const session = await auth();
   if (session?.user?.role !== "ADMIN") return { success: false, error: "Unauthorized" };
@@ -58,10 +59,12 @@ export async function createWarehouseShipment(
       data: {
         purchaseOrderId,
         status: "PENDING_PACKING",
+        ...(name ? { name } : {}),
       },
     });
 
     revalidatePath("/admin/warehouse");
+    revalidatePath("/admin/shipments");
     revalidatePath(`/admin/purchase-orders/${purchaseOrderId}`);
     return {
       success: true,
@@ -158,6 +161,7 @@ export async function addPackageToShipment(
     });
 
     revalidatePath(`/admin/warehouse/${parsed.data.warehouseShipmentId}`);
+    revalidatePath(`/admin/shipments/${parsed.data.warehouseShipmentId}`);
     revalidatePath(`/admin/purchase-orders/${shipment.purchaseOrderId}`);
     return { success: true, data: { success: true } };
   } catch (e: unknown) {
@@ -188,6 +192,7 @@ export async function updateShipmentCosts(
     });
 
     revalidatePath(`/admin/warehouse/${parsed.data.warehouseShipmentId}`);
+    revalidatePath(`/admin/shipments/${parsed.data.warehouseShipmentId}`);
     return { success: true, data: { success: true } };
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Failed to update costs";
@@ -242,7 +247,9 @@ export async function updateShipmentStatus(
     }
 
     revalidatePath(`/admin/warehouse/${parsed.data.warehouseShipmentId}`);
+    revalidatePath(`/admin/shipments/${parsed.data.warehouseShipmentId}`);
     revalidatePath("/admin/warehouse");
+    revalidatePath("/admin/shipments");
     return { success: true, data: { success: true } };
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Failed to update status";
@@ -278,7 +285,7 @@ async function handleShipmentDelivery(shipmentId: string) {
 
   if (!shipment) return;
 
-  const orderIdsToUpdate = new Set<string>();
+  const orderIdsToCheck = new Set<string>();
 
   for (const pkg of shipment.packages) {
     for (const item of pkg.items) {
@@ -290,29 +297,38 @@ async function handleShipmentDelivery(shipmentId: string) {
         data: { stock: { increment: item.quantity } },
       });
 
-      // Fulfill pre-order items tied to this PO item
+      // Archive warehouse inventory items for this product/PO
+      // Mark them as DELIVERED so they no longer appear as active inventory
+      await prisma.warehouseInventoryItem.updateMany({
+        where: {
+          purchaseOrderId: shipment.purchaseOrderId,
+          productId: poItem.productId,
+          status: "IN_WAREHOUSE",
+        },
+        data: { status: "DELIVERED" },
+      });
+
+      // Collect affected orders for status re-evaluation
       for (const preOrder of poItem.preOrderItems) {
-        orderIdsToUpdate.add(preOrder.orderItem.order.id);
+        orderIdsToCheck.add(preOrder.orderItem.order.id);
       }
     }
   }
 
-  // Update order statuses from AWAITING_STOCK -> PROCESSING for affected orders
-  for (const orderId of orderIdsToUpdate) {
-    const remainingPreOrders = await prisma.preOrderItem.count({
-      where: {
-        orderItem: { orderId },
-        purchaseOrderItem: {
-          purchaseOrder: {
-            shipments: {
-              some: {
-                status: { not: "DELIVERED" },
-                packages: {
-                  some: {
-                    items: {
-                      some: { purchaseOrderItem: { preOrderItems: { some: {} } } },
-                    },
-                  },
+  // Re-evaluate order statuses. An order can move from AWAITING_STOCK
+  // to PROCESSING when ALL of its pre-order items have been fulfilled
+  // (i.e., the linked PO items have been fully received).
+  for (const orderId of orderIdsToCheck) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          include: {
+            product: { select: { id: true, stock: true } },
+            preOrderItems: {
+              include: {
+                purchaseOrderItem: {
+                  select: { quantity: true, quantityReceived: true },
                 },
               },
             },
@@ -321,7 +337,33 @@ async function handleShipmentDelivery(shipmentId: string) {
       },
     });
 
-    if (remainingPreOrders === 0) {
+    if (!order) continue;
+
+    // An order is fully fulfillable when:
+    //   - Every OrderItem that is NOT a pre-order has stock available
+    //   - Every OrderItem that IS a pre-order has all its PO items fully received
+    let allItemsReady = true;
+
+    for (const orderItem of order.items) {
+      if (orderItem.preOrderItems.length > 0) {
+        // Pre-order item: check if all linked PO items are fully received
+        const allReceived = orderItem.preOrderItems.every(
+          (po) => po.purchaseOrderItem.quantityReceived >= po.purchaseOrderItem.quantity
+        );
+        if (!allReceived) {
+          allItemsReady = false;
+          break;
+        }
+      } else {
+        // Regular item: check stock availability
+        if (orderItem.product.stock < orderItem.quantity) {
+          allItemsReady = false;
+          break;
+        }
+      }
+    }
+
+    if (allItemsReady && order.status === "AWAITING_STOCK") {
       await prisma.order.update({
         where: { id: orderId },
         data: { status: "PROCESSING" },
@@ -336,22 +378,34 @@ export async function getWarehouseShipments() {
 
   const shipments = await prisma.warehouseShipment.findMany({
     include: {
-      purchaseOrder: { select: { poNumber: true, supplierName: true } },
+      purchaseOrder: { select: { id: true, poNumber: true, supplierName: true } },
       packages: { select: { id: true, weight: true } },
+      _count: { select: { inventoryItems: true } },
     },
     orderBy: { createdAt: "desc" },
   });
 
   return shipments.map((s) => ({
-    ...s,
+    id: s.id,
+    name: s.name,
+    shipmentNumber: s.shipmentNumber,
+    status: s.status,
     totalWeight: s.totalWeight ? Number(s.totalWeight) : null,
     baseShippingCost: s.baseShippingCost ? Number(s.baseShippingCost) : null,
     extraCost: s.extraCost ? Number(s.extraCost) : null,
     totalShippingCost: s.totalShippingCost ? Number(s.totalShippingCost) : null,
+    notes: s.notes,
+    packedAt: s.packedAt,
+    shippedAt: s.shippedAt,
+    deliveredAt: s.deliveredAt,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+    purchaseOrder: s.purchaseOrder,
     packages: s.packages.map((pkg) => ({
-      ...pkg,
+      id: pkg.id,
       weight: Number(pkg.weight),
     })),
+    inventoryItemCount: s._count.inventoryItems,
   }));
 }
 
@@ -364,6 +418,20 @@ export async function getWarehouseShipmentById(id: string) {
     include: {
       purchaseOrder: {
         select: { id: true, poNumber: true, supplierName: true, status: true },
+      },
+      inventoryItems: {
+        include: {
+          product: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              weight: true,
+              images: { orderBy: { position: "asc" }, take: 1 },
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
       },
       packages: {
         include: {
@@ -396,6 +464,23 @@ export async function getWarehouseShipmentById(id: string) {
     baseShippingCost: shipment.baseShippingCost ? Number(shipment.baseShippingCost) : null,
     extraCost: shipment.extraCost ? Number(shipment.extraCost) : null,
     totalShippingCost: shipment.totalShippingCost ? Number(shipment.totalShippingCost) : null,
+    inventoryItems: shipment.inventoryItems.map((item) => ({
+      id: item.id,
+      productName: item.productName,
+      productId: item.productId,
+      quantity: item.quantity,
+      weight: item.weight ? Number(item.weight) : null,
+      status: item.status,
+      product: item.product
+        ? {
+            id: item.product.id,
+            name: item.product.name,
+            slug: item.product.slug,
+            weight: item.product.weight ? Number(item.product.weight) : null,
+            images: item.product.images,
+          }
+        : null,
+    })),
     packages: shipment.packages.map((pkg) => ({
       ...pkg,
       weight: Number(pkg.weight),
@@ -438,34 +523,33 @@ export async function getPendingWarehouseItems(purchaseOrderId: string) {
     .filter((item) => item.remaining > 0);
 }
 
-// ─── Warehouse Stock / Inventory ─────────────────────
+// ─── Bulk Delete Shipments ────────────────────────────
 
-export async function getWarehouseStock() {
+export async function deleteWarehouseShipments(
+  ids: string[]
+): Promise<ActionResult<{ count: number }>> {
   const session = await auth();
-  if (session?.user?.role !== "ADMIN") throw new Error("Unauthorized");
+  if (session?.user?.role !== "ADMIN") return { success: false, error: "Unauthorized" };
 
-  const stock = await prisma.warehouseStock.findMany({
-    include: {
-      product: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          price: true,
-          stock: true,
-          reservedStock: true,
-          images: { orderBy: { position: "asc" }, take: 1 },
-        },
-      },
-    },
-    orderBy: { productName: "asc" },
-  });
+  if (!ids.length) return { success: false, error: "No shipments selected" };
 
-  return stock.map((s) => ({
-    ...s,
-    product: {
-      ...s.product,
-      price: Number(s.product.price),
-    },
-  }));
+  try {
+    // Unlink inventory items from these shipments first (SET NULL constraint)
+    await prisma.warehouseInventoryItem.updateMany({
+      where: { shipmentId: { in: ids } },
+      data: { shipmentId: null },
+    });
+
+    // Packages and package items are cascade-deleted by Prisma
+    await prisma.warehouseShipment.deleteMany({
+      where: { id: { in: ids } },
+    });
+
+    revalidatePath("/admin/shipments");
+    revalidatePath("/admin/warehouse");
+    return { success: true, data: { count: ids.length } };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "Failed to delete shipments";
+    return { success: false, error: message };
+  }
 }
